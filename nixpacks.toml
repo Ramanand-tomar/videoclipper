@@ -1,3 +1,0 @@
-# Configure Nixpacks to automatically install ffmpeg and yt-dlp on Render
-[phases.setup]
-nixPkgs = ["ffmpeg", "yt-dlp"]
