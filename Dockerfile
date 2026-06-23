@@ -20,11 +20,14 @@ WORKDIR /app
 # Copy packages
 COPY package*.json ./
 
-# Install npm packages (this will trigger postinstall assets preparation)
-RUN npm ci
+# Install npm packages (ignoring postinstall script initially to avoid missing scripts errors)
+RUN npm ci --ignore-scripts
 
 # Copy the rest of the project files
 COPY . .
+
+# Run the postinstall script manually now that the source files and scripts/ directory are present
+RUN npm run postinstall
 
 # Build Next.js in production mode
 RUN npm run build
