@@ -6470,6 +6470,81 @@ export default function App() {
     });
   };
 
+  const prepareUrisForExport = (engine: any) => {
+    const originalUris: Record<number, string> = {};
+    let tempBlobUrl: string | null = null;
+    if (videoFile) {
+      tempBlobUrl = URL.createObjectURL(videoFile);
+    }
+
+    try {
+      const videoBlocks = engine.block.findByType("video") ?? [];
+      for (const blockId of videoBlocks) {
+        const fillId = engine.block.getFill(blockId);
+        if (fillId && engine.block.isValid(fillId)) {
+          if (engine.block.hasProperty(fillId, "fill/video/fileURI")) {
+            const uri = engine.block.getString(fillId, "fill/video/fileURI");
+            originalUris[fillId] = uri;
+            if (uri.startsWith("opfs://") && tempBlobUrl) {
+              engine.block.setString(fillId, "fill/video/fileURI", tempBlobUrl);
+              console.log(`[Export] Swapped OPFS video fill ${fillId} to blob url`);
+            } else if (uri.startsWith("/videos/")) {
+              const absUrl = window.location.origin + uri;
+              engine.block.setString(fillId, "fill/video/fileURI", absUrl);
+              console.log(`[Export] Swapped relative B-roll fill ${fillId} to absolute url:`, absUrl);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to prepare video URIs for export", err);
+    }
+
+    try {
+      const audioBlocks = engine.block.findByType("audio") ?? [];
+      for (const blockId of audioBlocks) {
+        if (engine.block.hasProperty(blockId, "audio/uri")) {
+          const uri = engine.block.getString(blockId, "audio/uri");
+          originalUris[blockId] = uri;
+          if (uri.startsWith("/music/")) {
+            const absUrl = window.location.origin + uri;
+            engine.block.setString(blockId, "audio/uri", absUrl);
+            console.log(`[Export] Swapped relative audio block ${blockId} to absolute url:`, absUrl);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to prepare audio URIs for export", err);
+    }
+
+    return { originalUris, tempBlobUrl };
+  };
+
+  const restoreUrisAfterExport = (engine: any, originalUris: Record<number, string>, tempBlobUrl: string | null) => {
+    for (const [idStr, originalUri] of Object.entries(originalUris)) {
+      const id = parseInt(idStr, 10);
+      try {
+        if (engine.block.isValid(id)) {
+          if (originalUri.startsWith("opfs://")) {
+            engine.block.setString(id, "fill/video/fileURI", originalUri);
+            console.log(`[Export] Restored OPFS video fill ${id}`);
+          } else if (originalUri.startsWith("/videos/")) {
+            engine.block.setString(id, "fill/video/fileURI", originalUri);
+            console.log(`[Export] Restored B-roll video fill ${id}`);
+          } else if (originalUri.startsWith("/music/")) {
+            engine.block.setString(id, "audio/uri", originalUri);
+            console.log(`[Export] Restored audio block ${id}`);
+          }
+        }
+      } catch (err) {
+        console.warn(`Failed to restore URI for block ${id}`, err);
+      }
+    }
+    if (tempBlobUrl) {
+      URL.revokeObjectURL(tempBlobUrl);
+    }
+  };
+
   const handleYoutubeUpload = async () => {
     if (isUploadingToYoutube) return;
     const engine = engineRef.current;
@@ -6494,9 +6569,15 @@ export default function App() {
       }
 
       // 2. Export video to blob in-browser
-      const blob = await engine.block.exportVideo(pageId, {
-        mimeType: "video/mp4",
-      });
+      const { originalUris, tempBlobUrl } = prepareUrisForExport(engine);
+      let blob: Blob;
+      try {
+        blob = await engine.block.exportVideo(pageId, {
+          mimeType: "video/mp4",
+        });
+      } finally {
+        restoreUrisAfterExport(engine, originalUris, tempBlobUrl);
+      }
 
       // 3. Upload video directly to Cloudinary using FormData
       const formData = new FormData();
@@ -6615,10 +6696,16 @@ export default function App() {
 
     setIsExporting(true);
     setExportError(null);
+    console.log("Starting video export for pageId:", pageId);
+    const { originalUris, tempBlobUrl } = prepareUrisForExport(engine);
     try {
       const blob = await engine.block.exportVideo(pageId, {
         mimeType: "video/mp4",
-      });
+        onProgress: (rendered: number, encoded: number, total: number) => {
+          console.log(`Export progress: ${rendered}/${total} rendered, ${encoded}/${total} encoded`);
+        }
+      } as any);
+      console.log("Export succeeded, blob size:", blob.size);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       const baseName = videoFile?.name
@@ -6631,11 +6718,21 @@ export default function App() {
       link.remove();
       URL.revokeObjectURL(url);
     } catch (error) {
-      console.error("Failed to export video", error);
-      setExportError(
-        error instanceof Error ? error.message : "Failed to export video."
-      );
+      console.error("Failed to export video details:", error);
+      let errorMsg = "Failed to export video.";
+      if (error instanceof Error) {
+        errorMsg = `${error.name}: ${error.message}`;
+        if (error.stack) {
+          console.error("Stack trace:", error.stack);
+        }
+      } else if (typeof error === "object" && error !== null) {
+        errorMsg = `Error: ${JSON.stringify(error)}`;
+      } else {
+        errorMsg = `Error: ${String(error)}`;
+      }
+      setExportError(errorMsg);
     } finally {
+      restoreUrisAfterExport(engine, originalUris, tempBlobUrl);
       setIsExporting(false);
     }
   };
