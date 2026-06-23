@@ -6478,43 +6478,41 @@ export default function App() {
     }
 
     try {
-      const videoBlocks = engine.block.findByType("video") ?? [];
-      for (const blockId of videoBlocks) {
-        const fillId = engine.block.getFill(blockId);
-        if (fillId && engine.block.isValid(fillId)) {
-          if (engine.block.hasProperty(fillId, "fill/video/fileURI")) {
-            const uri = engine.block.getString(fillId, "fill/video/fileURI");
-            originalUris[fillId] = uri;
+      const allBlocks = engine.block.findAll() ?? [];
+      for (const blockId of allBlocks) {
+        if (!engine.block.isValid(blockId)) continue;
+
+        // Check for video fill property
+        if (engine.block.hasProperty(blockId, "fill/video/fileURI")) {
+          const uri = engine.block.getString(blockId, "fill/video/fileURI");
+          if (uri) {
+            originalUris[blockId] = uri;
             if (uri.startsWith("opfs://") && tempBlobUrl) {
-              engine.block.setString(fillId, "fill/video/fileURI", tempBlobUrl);
-              console.log(`[Export] Swapped OPFS video fill ${fillId} to blob url`);
+              engine.block.setString(blockId, "fill/video/fileURI", tempBlobUrl);
+              console.log(`[Export] Swapped OPFS block ${blockId} to blob url`);
             } else if (uri.startsWith("/videos/")) {
               const absUrl = window.location.origin + uri;
-              engine.block.setString(fillId, "fill/video/fileURI", absUrl);
-              console.log(`[Export] Swapped relative B-roll fill ${fillId} to absolute url:`, absUrl);
+              engine.block.setString(blockId, "fill/video/fileURI", absUrl);
+              console.log(`[Export] Swapped relative video block ${blockId} to absolute url:`, absUrl);
+            }
+          }
+        }
+
+        // Check for audio URI property
+        if (engine.block.hasProperty(blockId, "audio/uri")) {
+          const uri = engine.block.getString(blockId, "audio/uri");
+          if (uri) {
+            originalUris[blockId] = uri;
+            if (uri.startsWith("/music/")) {
+              const absUrl = window.location.origin + uri;
+              engine.block.setString(blockId, "audio/uri", absUrl);
+              console.log(`[Export] Swapped relative audio block ${blockId} to absolute url:`, absUrl);
             }
           }
         }
       }
     } catch (err) {
-      console.warn("Failed to prepare video URIs for export", err);
-    }
-
-    try {
-      const audioBlocks = engine.block.findByType("audio") ?? [];
-      for (const blockId of audioBlocks) {
-        if (engine.block.hasProperty(blockId, "audio/uri")) {
-          const uri = engine.block.getString(blockId, "audio/uri");
-          originalUris[blockId] = uri;
-          if (uri.startsWith("/music/")) {
-            const absUrl = window.location.origin + uri;
-            engine.block.setString(blockId, "audio/uri", absUrl);
-            console.log(`[Export] Swapped relative audio block ${blockId} to absolute url:`, absUrl);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn("Failed to prepare audio URIs for export", err);
+      console.warn("Failed to prepare block URIs for export", err);
     }
 
     return { originalUris, tempBlobUrl };
@@ -6525,15 +6523,12 @@ export default function App() {
       const id = parseInt(idStr, 10);
       try {
         if (engine.block.isValid(id)) {
-          if (originalUri.startsWith("opfs://")) {
+          if (engine.block.hasProperty(id, "fill/video/fileURI")) {
             engine.block.setString(id, "fill/video/fileURI", originalUri);
-            console.log(`[Export] Restored OPFS video fill ${id}`);
-          } else if (originalUri.startsWith("/videos/")) {
-            engine.block.setString(id, "fill/video/fileURI", originalUri);
-            console.log(`[Export] Restored B-roll video fill ${id}`);
-          } else if (originalUri.startsWith("/music/")) {
+            console.log(`[Export] Restored video block ${id} URI`);
+          } else if (engine.block.hasProperty(id, "audio/uri")) {
             engine.block.setString(id, "audio/uri", originalUri);
-            console.log(`[Export] Restored audio block ${id}`);
+            console.log(`[Export] Restored audio block ${id} URI`);
           }
         }
       } catch (err) {
