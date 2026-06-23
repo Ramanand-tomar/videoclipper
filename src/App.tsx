@@ -6470,6 +6470,41 @@ export default function App() {
     });
   };
 
+  const getBlockDebugInfo = (engine: any, error: unknown): string => {
+    if (!engine) return "";
+    if (error instanceof Error && error.message.includes("due to block")) {
+      const match = error.message.match(/due to block (\d+)/);
+      if (match && match[1]) {
+        const badBlockId = parseInt(match[1], 10);
+        try {
+          if (engine.block.isValid(badBlockId)) {
+            const type = engine.block.getType(badBlockId);
+            const name = engine.block.getName(badBlockId);
+            let info = ` [Block ${badBlockId} Type: ${type}, Name: ${name}`;
+            try {
+              const fillId = engine.block.getFill(badBlockId);
+              if (fillId && engine.block.isValid(fillId)) {
+                try {
+                  const fillUri = engine.block.getString(fillId, "fill/video/fileURI");
+                  info += `, Fill URI: ${fillUri}`;
+                } catch (_) {}
+              }
+            } catch (_) {}
+            try {
+              const audioUri = engine.block.getString(badBlockId, "audio/uri");
+              info += `, Audio URI: ${audioUri}`;
+            } catch (_) {}
+            info += `]`;
+            return info;
+          }
+        } catch (inspectErr) {
+          return ` [Failed to inspect block ${badBlockId}: ${inspectErr instanceof Error ? inspectErr.message : String(inspectErr)}]`;
+        }
+      }
+    }
+    return "";
+  };
+
   const prepareUrisForExport = (engine: any) => {
     const originalUris: Record<number, string> = {};
     let tempBlobUrl: string | null = null;
@@ -6663,9 +6698,10 @@ export default function App() {
       });
     } catch (err: any) {
       console.error("Direct YouTube Shorts upload flow failed:", err);
+      const debugInfo = getBlockDebugInfo(engineRef.current, err);
       setYoutubeUploadResult({
         success: false,
-        error: err.message || "Direct upload flow failed",
+        error: (err.message || "Direct upload flow failed") + debugInfo,
       });
     } finally {
       setIsUploadingToYoutube(false);
@@ -6762,7 +6798,8 @@ export default function App() {
       } else {
         errorMsg = `Error: ${String(error)}`;
       }
-      setExportError(errorMsg);
+      const debugInfo = getBlockDebugInfo(engine, error);
+      setExportError(errorMsg + debugInfo);
     } finally {
       restoreUrisAfterExport(engine, originalUris, tempBlobUrl);
       setIsExporting(false);
