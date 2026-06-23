@@ -5217,6 +5217,11 @@ export default function App() {
       input,
       output,
       video: { discard: true }, // Discard video track - we only need audio
+      audio: {
+        numberOfChannels: 1, // Downmix to mono to save 50% space
+        sampleRate: 16000,    // 16kHz is ideal for speech-to-text models
+        bitrate: 32000,       // 32kbps is highly compressed but clear for speech
+      }
     });
 
     setProgress(50);
