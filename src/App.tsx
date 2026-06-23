@@ -3369,231 +3369,221 @@ export default function App() {
   const loadVideoFile = async (file: File) => {
     if (!engineRef.current) return;
 
-    // File upload validation
-    const ALLOWED_VIDEO_TYPES = [
-      'video/mp4',
-      'video/quicktime',
-      'video/webm',
-      'video/x-msvideo', // .avi
-      'video/x-matroska', // .mkv
-      'video/mpeg',
-    ];
-
-    if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
-      alert(`Invalid file type: ${file.type}. Please upload a video file (MP4, MOV, WebM, AVI, MKV, MPEG).`);
-      return;
-    }
-
-    // Additional MIME type validation
-    const fileExtension = file.name.split('.').pop()?.toLowerCase();
-    const validExtensions = ['mp4', 'mov', 'webm', 'avi', 'mkv', 'mpeg', 'mpg'];
-    if (!fileExtension || !validExtensions.includes(fileExtension)) {
-      alert(`Invalid file extension. Please upload a video file.`);
-      return;
-    }
-
-    setVideoFile(file);
-    setIsExtracting(true);
-    resetWorkflowState();
-    resetPreloadState();
-    setTimelinePosition(0);
-    setIsPlaying(false);
-    setTimelineSegments([]);
-    setIsScrubbingTimeline(false);
-    setCurrentTranscriptWords([]);
-    setSourceVideoDuration(0);
-    setSourceVideoSize(null);
-    setAnalysisEstimate(null);
-    setAnalysisStage(null);
-    setAnalysisStartAt(null);
-    setIsFaceCropPending(false);
-    setCaptionsEnabled(true);
-    setTextHookEnabled(true);
-    setTranscriptDebug(null);
-    setGeminiDebug(null);
-    setGeminiFaceDebug(null);
-    setGeminiFaceThumbnail(null);
-    setDebugExportMetrics(null);
-    setCaptionDebug(null);
-    setIsDebugOpen(false);
-    setIsFaceDebugLoading(false);
-    setProgress(0);
-    setIsExporting(false);
-    setExportError(null);
-    faceCenterCacheRef.current.clear();
-    faceCropRunIdRef.current += 1;
-    textHookTextRef.current = null;
-    textHookDurationRef.current = HOOK_DURATION_SECONDS;
-    const existingEngine = engineRef.current;
-    captionStyleAppliedRef.current = false;
-    captionPresetAppliedRef.current = false;
-
-    const engine = existingEngine;
-
-    if (audioBlockRef.current) {
-      engine.block.destroy(audioBlockRef.current);
-      audioBlockRef.current = null;
-    }
-    if (videoBlockRef.current) {
-      engine.block.destroy(videoBlockRef.current);
-      videoBlockRef.current = null;
-    }
-    if (videoTemplateRef.current && engine.block.isValid(videoTemplateRef.current)) {
-      engine.block.destroy(videoTemplateRef.current);
-      videoTemplateRef.current = null;
-    }
-    if (captionsTrackRef.current && engine.block.isValid(captionsTrackRef.current)) {
-      engine.block.destroy(captionsTrackRef.current);
-      captionsTrackRef.current = null;
-    }
-    if (textHookBlockRef.current && engine.block.isValid(textHookBlockRef.current)) {
-      engine.block.destroy(textHookBlockRef.current);
-      textHookBlockRef.current = null;
-    }
-    if (videoTrackRef.current && engine.block.isValid(videoTrackRef.current)) {
-      const existingChildren = engine.block.getChildren(videoTrackRef.current) ?? [];
-      existingChildren.forEach((child: number) => {
-        if (engine.block.isValid(child)) {
-          engine.block.destroy(child);
-        }
-      });
-      videoTrackRef.current = null;
-    }
-
-    const blobUrl = URL.createObjectURL(file);
-    const opfs = await navigator.storage.estimate();
-    const directory = await navigator.storage.getDirectory();
-    // Sanitize filename to prevent path traversal and dangerous characters
-    const sanitizedFileName = file.name
-      .replace(/[<>:"|?*\x00-\x1F]/g, '') // Remove dangerous characters
-      .replace(/\.\./g, '') // Remove path traversal attempts
-      .replace(/^\.+/, '') // Remove leading dots
-      .replace(/\s+/g, '_') // Replace spaces with underscores
-      .substring(0, 255) // Limit filename length
-      || 'video.mp4'; // Fallback if name becomes empty
-
-    // Remove existing file if it exists to avoid lock conflicts
     try {
-      await directory.removeEntry(sanitizedFileName);
-    } catch (e) {
-      // File doesn't exist, which is fine
-    }
+      // File upload validation
+      const ALLOWED_VIDEO_TYPES = [
+        'video/mp4',
+        'video/quicktime',
+        'video/webm',
+        'video/x-msvideo', // .avi
+        'video/x-matroska', // .mkv
+        'video/mpeg',
+      ];
 
-    const opfsFile = await directory.getFileHandle(sanitizedFileName, { create: true });
-    const stream = await opfsFile.createWritable();
-
-    // Write file as ArrayBuffer to ensure complete data transfer
-    const arrayBuffer = await file.arrayBuffer();
-    await stream.write(arrayBuffer);
-    await stream.close();
-
-    // Small delay to ensure OPFS has fully persisted the file
-    await new Promise(resolve => setTimeout(resolve, 150));
-
-    const videoURL = "opfs://" + sanitizedFileName;
-
-
-    const videoBlockId = await engine.block.addVideo(videoURL, 1920, 1080);
-
-    setIsExtracting(false);
-
-    disableBlockHighlight(engine, videoBlockId);
-    if (pageRef.current && engine.block.isValid(pageRef.current)) {
-      engine.block.appendChild(pageRef.current, videoBlockId);
-      ensureTrackForVideoBlock(engine, videoBlockId);
-      try {
-        const videoFillId = engine.block.getFill(videoBlockId);
-        if (videoFillId) {
-          try {
-            // await engine.block.forceLoadAVResource(videoFillId);
-            // sleep 500ms
-            await new Promise(resolve => setTimeout(resolve, 500));
-          } catch (loadError) {
-            console.warn("Failed to eagerly load video resource", loadError);
-          }
-        }
-        const videoWidth = videoFillId
-          ? engine.block.getVideoWidth(videoFillId)
-          : engine.block.getVideoWidth(videoBlockId);
-        const videoHeight = videoFillId
-          ? engine.block.getVideoHeight(videoFillId)
-          : engine.block.getVideoHeight(videoBlockId);
-        let detectedDuration = 0;
-        if (videoFillId) {
-          try {
-            detectedDuration = engine.block.getDouble(
-              videoFillId,
-              "fill/video/totalDuration"
-            );
-          } catch (durationError) {
-            console.warn("Failed to read video duration", durationError);
-          }
-        }
-        if (!Number.isFinite(detectedDuration) || detectedDuration <= 0) {
-          detectedDuration = engine.block.getDuration(videoBlockId);
-        }
-        const sourceWidth =
-          Number.isFinite(videoWidth) && videoWidth > 0 ? videoWidth : 1920;
-        const sourceHeight =
-          Number.isFinite(videoHeight) && videoHeight > 0 ? videoHeight : 1080;
-        setSourceVideoSize({ width: sourceWidth, height: sourceHeight });
-        engine.block.setWidth(pageRef.current, sourceWidth);
-        engine.block.setHeight(pageRef.current, sourceHeight);
-        if (Number.isFinite(detectedDuration) && detectedDuration > 0) {
-          setSourceVideoDuration(detectedDuration);
-          engine.block.setDuration(pageRef.current, detectedDuration);
-          try {
-            const blockFill = videoFillId ?? engine.block.getFill(videoBlockId);
-            if (blockFill) {
-              engine.block.setTrimOffset(blockFill, 0);
-              engine.block.setTrimLength(blockFill, detectedDuration);
-            }
-          } catch (trimError) {
-            console.warn("Failed to align video trim to duration", trimError);
-          }
-          try {
-            engine.block.setDuration(videoBlockId, detectedDuration);
-          } catch (clipDurationError) {
-            console.warn("Failed to align video block duration", clipDurationError);
-          }
-        }
-        engine.block.setPosition(videoBlockId, 0, 0);
-        engine.block.setSize(videoBlockId, sourceWidth, sourceHeight);
-      } catch (dimensionError) {
-        console.warn("Failed to read video dimensions", dimensionError);
-        const fallbackWidth = 1920;
-        const fallbackHeight = 1080;
-        setSourceVideoSize({ width: fallbackWidth, height: fallbackHeight });
-        engine.block.setWidth(pageRef.current, fallbackWidth);
-        engine.block.setHeight(pageRef.current, fallbackHeight);
-        engine.block.setPosition(videoBlockId, 0, 0);
-        engine.block.setSize(videoBlockId, fallbackWidth, fallbackHeight);
+      if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
+        alert(`Invalid file type: ${file.type}. Please upload a video file (MP4, MOV, WebM, AVI, MKV, MPEG).`);
+        return;
       }
-      try {
-        await engine.scene.zoomToBlock(pageRef.current, { padding: 0 });
-      } catch (zoomError) {
-        console.warn("Failed to zoom to page", zoomError);
-      }
-      updateTimelineDuration(engine);
-    }
-    videoBlockRef.current = videoBlockId;
-    ensureCaptionsTrack(engine);
-    clearCaptionsTrack(engine);
 
-    try {
-      const templateClone = engine.block.duplicate(videoBlockId, false);
-      const templateParent = engine.block.getParent(templateClone);
-      if (templateParent && engine.block.isValid(templateParent)) {
+      // Additional MIME type validation
+      const fileExtension = file.name.split('.').pop()?.toLowerCase();
+      const validExtensions = ['mp4', 'mov', 'webm', 'avi', 'mkv', 'mpeg', 'mpg'];
+      if (!fileExtension || !validExtensions.includes(fileExtension)) {
+        alert(`Invalid file extension. Please upload a video file.`);
+        return;
+      }
+
+      setVideoFile(file);
+      setIsExtracting(true);
+      resetWorkflowState();
+      resetPreloadState();
+      setTimelinePosition(0);
+      setIsPlaying(false);
+      setTimelineSegments([]);
+      setIsScrubbingTimeline(false);
+      setCurrentTranscriptWords([]);
+      setSourceVideoDuration(0);
+      setSourceVideoSize(null);
+      setAnalysisEstimate(null);
+      setAnalysisStage(null);
+      setAnalysisStartAt(null);
+      setIsFaceCropPending(false);
+      setCaptionsEnabled(true);
+      setTextHookEnabled(true);
+      setTranscriptDebug(null);
+      setGeminiDebug(null);
+      setGeminiFaceDebug(null);
+      setGeminiFaceThumbnail(null);
+      setDebugExportMetrics(null);
+      setCaptionDebug(null);
+      setIsDebugOpen(false);
+      setIsFaceDebugLoading(false);
+      setProgress(0);
+      setIsExporting(false);
+      setExportError(null);
+      faceCenterCacheRef.current.clear();
+      faceCropRunIdRef.current += 1;
+      textHookTextRef.current = null;
+      textHookDurationRef.current = HOOK_DURATION_SECONDS;
+      const existingEngine = engineRef.current;
+      captionStyleAppliedRef.current = false;
+      captionPresetAppliedRef.current = false;
+
+      const engine = existingEngine;
+
+      if (audioBlockRef.current) {
+        engine.block.destroy(audioBlockRef.current);
+        audioBlockRef.current = null;
+      }
+      if (videoBlockRef.current) {
+        engine.block.destroy(videoBlockRef.current);
+        videoBlockRef.current = null;
+      }
+      if (videoTemplateRef.current && engine.block.isValid(videoTemplateRef.current)) {
+        engine.block.destroy(videoTemplateRef.current);
+        videoTemplateRef.current = null;
+      }
+      if (captionsTrackRef.current && engine.block.isValid(captionsTrackRef.current)) {
+        engine.block.destroy(captionsTrackRef.current);
+        captionsTrackRef.current = null;
+      }
+      if (textHookBlockRef.current && engine.block.isValid(textHookBlockRef.current)) {
+        engine.block.destroy(textHookBlockRef.current);
+        textHookBlockRef.current = null;
+      }
+      if (videoTrackRef.current && engine.block.isValid(videoTrackRef.current)) {
+        const existingChildren = engine.block.getChildren(videoTrackRef.current) ?? [];
+        existingChildren.forEach((child: number) => {
+          if (engine.block.isValid(child)) {
+            engine.block.destroy(child);
+          }
+        });
+        videoTrackRef.current = null;
+      }
+
+      const blobUrl = URL.createObjectURL(file);
+      let videoURL = blobUrl;
+      let isOpfsUsed = false;
+
+      try {
+        const opfs = await navigator.storage.estimate();
+        const directory = await navigator.storage.getDirectory();
+        // Sanitize filename to prevent path traversal and dangerous characters
+        const sanitizedFileName = file.name
+          .replace(/[<>:"|?*\x00-\x1F]/g, '') // Remove dangerous characters
+          .replace(/\.\./g, '') // Remove path traversal attempts
+          .replace(/^\.+/, '') // Remove leading dots
+          .replace(/\s+/g, '_') // Replace spaces with underscores
+          .substring(0, 255) // Limit filename length
+          || 'video.mp4'; // Fallback if name becomes empty
+
+        // Remove existing file if it exists to avoid lock conflicts
         try {
-          engine.block.removeChild(templateParent, templateClone);
-        } catch (detachError) {
-          console.warn("Failed to detach template clone from parent", detachError);
+          await directory.removeEntry(sanitizedFileName);
+        } catch (e) {
+          // File doesn't exist, which is fine
+        }
+
+        const opfsFile = await directory.getFileHandle(sanitizedFileName, { create: true });
+        if (opfsFile && typeof (opfsFile as any).createWritable === 'function') {
+          const stream = await (opfsFile as any).createWritable();
+          const arrayBuffer = await file.arrayBuffer();
+          await stream.write(arrayBuffer);
+          await stream.close();
+          await new Promise(resolve => setTimeout(resolve, 150));
+          videoURL = "opfs://" + sanitizedFileName;
+          isOpfsUsed = true;
+        } else {
+          console.warn("OPFS FileSystemFileHandle.createWritable is not supported in this browser. Falling back to Blob URL.");
+        }
+      } catch (opfsError) {
+        console.warn("Failed to write video file to OPFS. Falling back to Blob URL:", opfsError);
+        videoURL = blobUrl;
+      }
+
+      let videoBlockId: number;
+      try {
+        videoBlockId = await engine.block.addVideo(videoURL, 1920, 1080);
+      } catch (addError) {
+        if (isOpfsUsed) {
+          console.warn("CreativeEngine failed to load opfs:// URL. Retrying with Blob URL fallback...", addError);
+          videoURL = blobUrl;
+          videoBlockId = await engine.block.addVideo(videoURL, 1920, 1080);
+        } else {
+          throw addError;
         }
       }
-      videoTemplateRef.current = templateClone;
-    } catch (error) {
-      console.warn("Failed to create video template", error);
-      videoTemplateRef.current = null;
+
+      setIsExtracting(false);
+
+      disableBlockHighlight(engine, videoBlockId);
+      if (pageRef.current && engine.block.isValid(pageRef.current)) {
+        engine.block.appendChild(pageRef.current, videoBlockId);
+        ensureTrackForVideoBlock(engine, videoBlockId);
+        try {
+          const videoFillId = engine.block.getFill(videoBlockId);
+          if (videoFillId) {
+            try {
+              // await engine.block.forceLoadAVResource(videoFillId);
+              // sleep 500ms
+              await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (loadError) {
+              console.warn("Failed to eagerly load video resource", loadError);
+            }
+          }
+          const videoWidth = videoFillId
+            ? engine.block.getVideoWidth(videoFillId)
+            : engine.block.getVideoWidth(videoBlockId);
+          const videoHeight = videoFillId
+            ? engine.block.getVideoHeight(videoFillId)
+            : engine.block.getVideoHeight(videoBlockId);
+          const sourceWidth = Number.isFinite(videoWidth) && videoWidth > 0 ? videoWidth : 1920;
+          const sourceHeight = Number.isFinite(videoHeight) && videoHeight > 0 ? videoHeight : 1080;
+          setSourceVideoSize({ width: sourceWidth, height: sourceHeight });
+          engine.block.setWidth(pageRef.current, sourceWidth);
+          engine.block.setHeight(pageRef.current, sourceHeight);
+          engine.block.setPosition(videoBlockId, 0, 0);
+          engine.block.setSize(videoBlockId, sourceWidth, sourceHeight);
+        } catch (dimensionError) {
+          console.warn("Failed to read video dimensions", dimensionError);
+          const fallbackWidth = 1920;
+          const fallbackHeight = 1080;
+          setSourceVideoSize({ width: fallbackWidth, height: fallbackHeight });
+          engine.block.setWidth(pageRef.current, fallbackWidth);
+          engine.block.setHeight(pageRef.current, fallbackHeight);
+          engine.block.setPosition(videoBlockId, 0, 0);
+          engine.block.setSize(videoBlockId, fallbackWidth, fallbackHeight);
+        }
+        try {
+          await engine.scene.zoomToBlock(pageRef.current, { padding: 0 });
+        } catch (zoomError) {
+          console.warn("Failed to zoom to page", zoomError);
+        }
+        updateTimelineDuration(engine);
+      }
+      videoBlockRef.current = videoBlockId;
+      ensureCaptionsTrack(engine);
+      clearCaptionsTrack(engine);
+
+      try {
+        const templateClone = engine.block.duplicate(videoBlockId, false);
+        const templateParent = engine.block.getParent(templateClone);
+        if (templateParent && engine.block.isValid(templateParent)) {
+          try {
+            engine.block.removeChild(templateParent, templateClone);
+          } catch (detachError) {
+            console.warn("Failed to detach template clone from parent", detachError);
+          }
+        }
+        videoTemplateRef.current = templateClone;
+      } catch (error) {
+        console.warn("Failed to create video template", error);
+        videoTemplateRef.current = null;
+      }
+    } catch (err: any) {
+      console.error("Error loading video file:", err);
+      alert("Error loading video file: " + (err.message || String(err)));
+      setIsExtracting(false);
     }
   };
 
