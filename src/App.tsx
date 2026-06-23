@@ -3662,7 +3662,10 @@ export default function App() {
         try {
           errData = await response.json();
         } catch (_) {}
-        throw new Error(errData?.error || errData?.detail || `Server responded with ${response.status}`);
+        const errorMessage = errData
+          ? `${errData.error || "Error"}${errData.detail ? `: ${errData.detail}` : ""}`
+          : `Server responded with ${response.status}`;
+        throw new Error(errorMessage);
       }
       
       const blob = await response.blob();

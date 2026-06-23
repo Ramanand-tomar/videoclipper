@@ -156,10 +156,15 @@ export async function POST(req) {
       } catch (_) {}
     }
 
+    let detail = error instanceof Error ? error.message : String(error);
+    if (detail.includes("ENOENT") || detail.includes("spawn yt-dlp")) {
+      detail = "yt-dlp command-line tool was not found on the server. If you are running on Vercel, please note that serverless environments lack yt-dlp and ffmpeg pre-installed, and exceed the 10s execution limit. Please run the project locally using 'npm run dev'.";
+    }
+
     return NextResponse.json(
       { 
         error: "Failed to download YouTube video", 
-        detail: error instanceof Error ? error.message : String(error) 
+        detail: detail
       },
       { status: 500 }
     );
