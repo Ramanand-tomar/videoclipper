@@ -142,7 +142,7 @@ const normalizeTranscriptWordList = (
 ): TranscriptWord[] => {
   if (!Array.isArray(words)) return [];
   return words
-    .map((word) => {
+    .map((word): TranscriptWord | null => {
       const text = word?.text?.trim();
       if (!text) return null;
       const start = Number.parseFloat(String(word?.start ?? 0));
@@ -157,7 +157,7 @@ const normalizeTranscriptWordList = (
         speaker_id: word?.speaker_id ?? null,
       };
     })
-    .filter((word): word is TranscriptWord => Boolean(word))
+    .filter((word): word is TranscriptWord => word !== null)
     .sort((a, b) => a.start - b.start);
 };
 
@@ -234,6 +234,9 @@ const normalizeGeminiConceptChoice = (
   const idSource =
     normalizeTextValue(concept.id ?? concept.name ?? concept.label) || null;
   const id = ensureConceptId(idSource, title, index, seenIds);
+  const youtubeTitle = normalizeTextValue(concept.youtube_title) || null;
+  const youtubeDesc = normalizeTextValue(concept.youtube_description) || null;
+  const emojiList = Array.isArray(concept.emojis) ? concept.emojis : [];
   return {
     id,
     title,
@@ -242,6 +245,9 @@ const normalizeGeminiConceptChoice = (
     trimmed_words: trimmedWords,
     notes,
     estimated_duration_seconds: estimated,
+    youtube_title: youtubeTitle,
+    youtube_description: youtubeDesc,
+    emojis: emojiList,
   };
 };
 
@@ -297,6 +303,9 @@ export const normalizeGeminiRefinement = (
     null;
   const resolvedWords =
     trimmedWords.length > 0 ? trimmedWords : fallbackConcept?.trimmed_words ?? [];
+  const youtubeTitle = normalizeTextValue(value?.youtube_title) ?? fallbackConcept?.youtube_title ?? null;
+  const youtubeDesc = normalizeTextValue(value?.youtube_description) ?? fallbackConcept?.youtube_description ?? null;
+  const emojiList = Array.isArray(value?.emojis) ? value.emojis : (fallbackConcept?.emojis ?? []);
 
   return {
     hook,
@@ -305,5 +314,8 @@ export const normalizeGeminiRefinement = (
     estimated_duration_seconds: estimated,
     concepts,
     default_concept_id: fallbackConcept?.id ?? null,
+    youtube_title: youtubeTitle,
+    youtube_description: youtubeDesc,
+    emojis: emojiList,
   };
 };

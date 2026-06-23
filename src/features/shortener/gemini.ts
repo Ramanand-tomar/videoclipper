@@ -69,7 +69,8 @@ export const requestGeminiRefinement = async (
 
   let parsed: GeminiRefinement;
   try {
-    parsed = JSON.parse(aggregatedText);
+    const cleanText = aggregatedText.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+    parsed = JSON.parse(cleanText);
   } catch (error) {
     console.error("Gemini raw response", aggregatedText);
     throw new Error("Gemini response was not valid JSON.");

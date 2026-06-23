@@ -80,7 +80,7 @@ export const useCesdkEngine = (options: UseCesdkEngineOptions = {}) => {
         // Clean OPFS directory on initialization
         try {
           const directory = await navigator.storage.getDirectory();
-          const entries = directory.values();
+          const entries = (directory as any).values();
           for await (const entry of entries) {
             try {
               await directory.removeEntry(entry.name);
@@ -135,7 +135,7 @@ export const useCesdkEngine = (options: UseCesdkEngineOptions = {}) => {
     engineCanvasContainer.replaceChildren(engine.element);
     const page = pageRef.current;
     if (page && engine.block.isValid(page)) {
-      engine.scene.zoomToBlock(page, { padding: 0 }).catch((error) => {
+      engine.scene.zoomToBlock(page, { padding: 0 }).catch((error: any) => {
         console.warn("Failed to zoom after canvas attach", error);
       });
     }

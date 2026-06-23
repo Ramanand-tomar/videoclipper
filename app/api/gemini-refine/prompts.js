@@ -23,6 +23,13 @@ export const SINGLE_RESPONSE_SCHEMA = `Return STRICT JSON matching this schema:
   "hook": string optional (6-12 words, social-media hook for this clip),
   "trimmed_text": string (the edited transcript using only words from TRANSCRIPT_TEXT),
   "estimated_duration_seconds": number optional,
+  "youtube_title": string (viral YouTube Shorts title under 60 chars, with 1-2 hashtags like #shorts),
+  "youtube_description": string (engaging YouTube Shorts description with a brief summary and 3-5 hashtags),
+  "emojis": [{
+    "emoji": string (the emoji character, e.g. "🔥" or "💰"),
+    "word_index": number (0-indexed position of the word in trimmed_text where this emoji pops up),
+    "duration": number (duration to display in seconds, 1.5 - 2.5)
+  }] optional,
   "notes": string optional (briefly explain the primary edits you made)
 }
 
@@ -38,6 +45,13 @@ export const buildMultiConceptSchema = (maxVariants) => `Return STRICT JSON matc
     "hook": string optional (6-12 words, social-media hook for this clip),
     "trimmed_text": string (the edited transcript using only words from TRANSCRIPT_TEXT),
     "estimated_duration_seconds": number optional,
+    "youtube_title": string (viral YouTube Shorts title under 60 chars, with 1-2 hashtags like #shorts),
+    "youtube_description": string (engaging YouTube Shorts description with a brief summary and 3-5 hashtags),
+    "emojis": [{
+      "emoji": string (the emoji character, e.g. "🔥"),
+      "word_index": number (0-indexed position of the word in trimmed_text where this emoji pops up),
+      "duration": number (duration in seconds, 1.5 - 2.5)
+    }] optional,
     "notes": string optional (call out bold choices or tradeoffs)
   }]
 }

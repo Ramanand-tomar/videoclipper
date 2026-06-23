@@ -16,4 +16,9 @@ export const SPEAKER_TEMPLATE_OPTIONS: SpeakerTemplateOption[] = [
     label: "Multi",
     description: "Show the active speaker with the others below.",
   },
+  {
+    id: "split-gameplay",
+    label: "Split (Gameplay)",
+    description: "Split layout with satisfying gameplay B-roll on the bottom.",
+  },
 ];

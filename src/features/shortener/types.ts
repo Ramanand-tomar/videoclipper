@@ -20,7 +20,8 @@ export type SpeakerTemplateId =
   | "sidecar"
   | "overlay"
   | "solo"
-  | "multi";
+  | "multi"
+  | "split-gameplay";
 export type SpeakerTemplateOption = {
   id: SpeakerTemplateId;
   label: string;
@@ -30,6 +31,12 @@ export type SpeechToTextProvider =
   | "elevenlabs"
   | "openai-whisper"
   | "openai-gpt4o";
+
+export type GeminiEmoji = {
+  emoji: string;
+  word_index: number;
+  duration: number;
+};
 
 export type GeminiConceptRaw = {
   id?: string | null;
@@ -44,6 +51,9 @@ export type GeminiConceptRaw = {
   notes?: string | null;
   estimated_duration_seconds?: number | null;
   trimmed_words?: TranscriptWord[];
+  youtube_title?: string | null;
+  youtube_description?: string | null;
+  emojis?: GeminiEmoji[] | null;
 };
 
 export type GeminiRefinementPayload = {
@@ -53,6 +63,9 @@ export type GeminiRefinementPayload = {
   estimated_duration_seconds?: number | null;
   default_concept_id?: string | null;
   concepts?: GeminiConceptRaw[];
+  youtube_title?: string | null;
+  youtube_description?: string | null;
+  emojis?: GeminiEmoji[] | null;
 };
 
 export type GeminiConceptChoice = {
@@ -63,6 +76,9 @@ export type GeminiConceptChoice = {
   trimmed_words: TranscriptWord[];
   notes: string | null;
   estimated_duration_seconds: number | null;
+  youtube_title: string | null;
+  youtube_description: string | null;
+  emojis: GeminiEmoji[];
 };
 
 export type GeminiRefinement = {
@@ -72,6 +88,9 @@ export type GeminiRefinement = {
   estimated_duration_seconds: number | null;
   concepts: GeminiConceptChoice[];
   default_concept_id: string | null;
+  youtube_title: string | null;
+  youtube_description: string | null;
+  emojis: GeminiEmoji[];
 };
 
 export type GeminiRefinementOptions = {

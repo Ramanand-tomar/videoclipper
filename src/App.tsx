@@ -13,6 +13,7 @@ import {
 import { registerMp3Encoder } from "@mediabunny/mp3-encoder";
 
 // Register MP3 encoder for audio extraction
+import { Loader2, UploadCloud } from "lucide-react";
 registerMp3Encoder();
 import {
   buildTranscriptWordsFromText,
@@ -32,6 +33,7 @@ import { useShortenerWorkflow } from "@/features/shortener/use-shortener-workflo
 import type {
   CaptionSegment,
   FaceBounds,
+  GeminiEmoji,
   GeminiRefinement,
   ProcessingStepId,
   RangeMapping,
@@ -217,6 +219,30 @@ export default function App() {
   const [geminiFaceThumbnail, setGeminiFaceThumbnail] = useState<string | null>(
     null
   );
+  const [captionsStyle, setCaptionsStyle] = useState<"standard" | "hormozi">("standard");
+  const [bgMusicEnabled, setBgMusicEnabled] = useState(false);
+  const [emojisEnabled, setEmojisEnabled] = useState(true);
+  const [progressBarEnabled, setProgressBarEnabled] = useState(true);
+  const [youtubeTitle, setYoutubeTitle] = useState("");
+  const [youtubeDescription, setYoutubeDescription] = useState("");
+  const [isUploadingToYoutube, setIsUploadingToYoutube] = useState(false);
+  const [youtubeUploadResult, setYoutubeUploadResult] = useState<{
+    success: boolean;
+    videoId?: string;
+    url?: string;
+    error?: string;
+  } | null>(null);
+  const [youtubeAuth, setYoutubeAuth] = useState<{
+    authenticated: boolean;
+    channelTitle?: string;
+    channelThumbnail?: string;
+  }>({ authenticated: false });
+
+  const bgMusicBlockRef = useRef<number | null>(null);
+  const emojiBlockIdsRef = useRef<number[]>([]);
+  const progressBarBlockIdsRef = useRef<number[]>([]);
+  const isMusicDuckedRef = useRef(false);
+  const mappedRefinedWordsRef = useRef<TranscriptWord[]>([]);
   const [preloadScript, setPreloadScript] = useState<string | null>(null);
   const [isPreloadScriptExporting, setIsPreloadScriptExporting] =
     useState(false);
@@ -316,6 +342,9 @@ export default function App() {
     videoBlockRef.current = null;
     audioBlockRef.current = null;
     captionsTrackRef.current = null;
+    progressBarBlockIdsRef.current = [];
+    emojiBlockIdsRef.current = [];
+    bgMusicBlockRef.current = null;
     captionStyleAppliedRef.current = false;
     captionPresetAppliedRef.current = false;
     textHookBlockRef.current = null;
@@ -374,6 +403,25 @@ export default function App() {
     }
     videoBlockRef.current = null;
 
+    progressBarBlockIdsRef.current.forEach((id) => {
+      if (engine.block.isValid(id)) {
+        try { engine.block.destroy(id); } catch(e) {}
+      }
+    });
+    progressBarBlockIdsRef.current = [];
+
+    emojiBlockIdsRef.current.forEach((id) => {
+      if (engine.block.isValid(id)) {
+        try { engine.block.destroy(id); } catch(e) {}
+      }
+    });
+    emojiBlockIdsRef.current = [];
+
+    if (bgMusicBlockRef.current && engine.block.isValid(bgMusicBlockRef.current)) {
+      try { engine.block.destroy(bgMusicBlockRef.current); } catch(e) {}
+    }
+    bgMusicBlockRef.current = null;
+
     if (
       videoTemplateRef.current &&
       engine.block.isValid(videoTemplateRef.current)
@@ -399,7 +447,7 @@ export default function App() {
 
     if (videoTrackRef.current && engine.block.isValid(videoTrackRef.current)) {
       const existingChildren = engine.block.getChildren(videoTrackRef.current) ?? [];
-      existingChildren.forEach((child) => {
+      existingChildren.forEach((child: number) => {
         if (engine.block.isValid(child)) {
           engine.block.destroy(child);
         }
@@ -589,7 +637,7 @@ export default function App() {
 
     if (videoTrackRef.current && engine.block.isValid(videoTrackRef.current)) {
       const children = engine.block.getChildren(videoTrackRef.current) ?? [];
-      children.forEach((child) => applyLayout(child));
+      children.forEach((child: number) => applyLayout(child));
     } else if (videoBlockRef.current) {
       applyLayout(videoBlockRef.current);
     }
@@ -677,7 +725,7 @@ export default function App() {
           safeTime,
           safeTime,
           1,
-          (_index, result) => {
+          (_index: number, result: any) => {
             cancel?.();
             if (result instanceof Error) {
               finalize(() => reject(result));
@@ -1387,6 +1435,25 @@ export default function App() {
       };
     }
 
+    if (templateId === "split-gameplay") {
+      return {
+        active: {
+          x: 0,
+          y: 0,
+          width: sceneWidth,
+          height: sceneHeight / 2,
+        },
+        thumbs: [
+          {
+            x: 0,
+            y: sceneHeight / 2,
+            width: sceneWidth,
+            height: sceneHeight / 2,
+          }
+        ],
+      };
+    }
+
     if (templateId === "multi") {
       const aspectRatio = sceneWidth / sceneHeight;
       const isVertical = aspectRatio < 1; // 9:16 or similar
@@ -1682,7 +1749,7 @@ export default function App() {
     }
     if (videoTrackRef.current && engine.block.isValid(videoTrackRef.current)) {
       const children = engine.block.getChildren(videoTrackRef.current) ?? [];
-      const candidate = children.find((child) => engine.block.isValid(child));
+      const candidate = children.find((child: number) => engine.block.isValid(child));
       if (candidate) return candidate;
     }
     return null;
@@ -2555,13 +2622,15 @@ export default function App() {
       if (templateId === "none") return;
       const assignments = speakerAssignmentsRef.current;
       const speakerIds = getTemplateSpeakerIds(assignments);
-      if (speakerIds.length < 2) return;
-      const uniqueSlots = new Set(
-        Object.values(assignments).filter(
-          (slot) => typeof slot === "number" && Number.isFinite(slot)
-        )
-      );
-      if (uniqueSlots.size < 2) return;
+      if (templateId !== "split-gameplay") {
+        if (speakerIds.length < 2) return;
+        const uniqueSlots = new Set(
+          Object.values(assignments).filter(
+            (slot) => typeof slot === "number" && Number.isFinite(slot)
+          )
+        );
+        if (uniqueSlots.size < 2) return;
+      }
       const clipRanges = clipRangesRef.current;
       const baseClipIds = baseClipIdsRef.current;
       if (!clipRanges.length || !baseClipIds.length) return;
@@ -2888,14 +2957,19 @@ export default function App() {
           const trackId = slotTracks[slotIndex];
           const slot = slotLayouts[slotIndex];
           const speakerId = slotSpeakerIds[slotIndex] ?? null;
+          const isBroll = templateId === "split-gameplay" && slotIndex === 1;
           if (!slot) continue;
-          if (!speakerId) continue;
+          if (!speakerId && !isBroll) continue;
 
           let clip: number;
           try {
-            clip = engine.block.duplicate(templateSource, false);
+            if (isBroll) {
+              clip = await engine.block.addVideo("/videos/satisfying.mp4", 1920, 1080);
+            } else {
+              clip = engine.block.duplicate(templateSource, false);
+            }
           } catch (error) {
-            console.warn("Failed to duplicate template clip", error);
+            console.warn("Failed to create template clip", error);
             continue;
           }
           disableBlockHighlight(engine, clip);
@@ -2909,15 +2983,23 @@ export default function App() {
           }
           const clipFill = engine.block.getFill(clip);
           if (clipFill) {
-            engine.block.setTrimOffset(clipFill, range.start);
-            engine.block.setTrimLength(clipFill, duration);
+            if (isBroll) {
+              engine.block.setTrimOffset(clipFill, range.start % 15);
+              engine.block.setTrimLength(clipFill, duration);
+            } else {
+              engine.block.setTrimOffset(clipFill, range.start);
+              engine.block.setTrimLength(clipFill, duration);
+            }
           }
           engine.block.setDuration(clip, duration);
 
           // Mute audio on all clips except the first slot (active speaker)
           // to prevent multiple audio streams playing simultaneously
-          if (slotIndex > 0) {
+          if (slotIndex > 0 || isBroll) {
             try {
+              if (clipFill) {
+                engine.block.setMuted(clipFill, true);
+              }
               engine.block.setMuted(clip, true);
             } catch (muteError) {
               console.warn("Failed to mute template clip audio", muteError);
@@ -2939,7 +3021,7 @@ export default function App() {
             console.warn("Failed to set content fill mode", error);
           }
 
-          const face = faceMap.get(speakerId);
+          const face = isBroll ? null : faceMap.get(speakerId);
           const assignedSlotIndex = assignments[speakerId];
           const slotIndexHint =
             typeof assignedSlotIndex === "number" && Number.isFinite(assignedSlotIndex)
@@ -2947,6 +3029,7 @@ export default function App() {
               : null;
           let resolvedFace = face ?? null;
           if (
+            !isBroll &&
             baseClipId &&
             engine.block.isValid(baseClipId) &&
             slotIndexHint !== null
@@ -3219,6 +3302,23 @@ export default function App() {
             setTimelinePosition(time);
             const playing = engine.block.isPlaying(pageId);
             setIsPlaying(playing);
+
+            // Auto-ducking background music
+            const bgMusicBlockId = bgMusicBlockRef.current;
+            if (bgMusicBlockId && engine.block.isValid(bgMusicBlockId) && bgMusicEnabled) {
+              const isSpeechActive = mappedRefinedWordsRef.current.some(
+                (w) => time >= (w.start ?? 0) && time <= (w.end ?? 0)
+              );
+              if (isSpeechActive && !isMusicDuckedRef.current) {
+                isMusicDuckedRef.current = true;
+                try { engine.block.setDouble(bgMusicBlockId, "audio/volume", 0.08); } catch(e) {}
+                try { engine.block.setDouble(bgMusicBlockId, "playback/volume", 0.08); } catch(e) {}
+              } else if (!isSpeechActive && isMusicDuckedRef.current) {
+                isMusicDuckedRef.current = false;
+                try { engine.block.setDouble(bgMusicBlockId, "audio/volume", 0.25); } catch(e) {}
+                try { engine.block.setDouble(bgMusicBlockId, "playback/volume", 0.25); } catch(e) {}
+              }
+            }
           }
         } catch (error) {
           console.warn("Failed to read playback time", error);
@@ -3228,7 +3328,7 @@ export default function App() {
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [isScrubbingTimeline]);
+  }, [isScrubbingTimeline, bgMusicEnabled]);
 
   useEffect(() => {
     if (autoProcessStatuses.analysis !== "active") {
@@ -3352,7 +3452,7 @@ export default function App() {
     }
     if (videoTrackRef.current && engine.block.isValid(videoTrackRef.current)) {
       const existingChildren = engine.block.getChildren(videoTrackRef.current) ?? [];
-      existingChildren.forEach((child) => {
+      existingChildren.forEach((child: number) => {
         if (engine.block.isValid(child)) {
           engine.block.destroy(child);
         }
@@ -4147,11 +4247,11 @@ export default function App() {
         : counts;
     const resolvedCounts = filteredCounts.size ? filteredCounts : counts;
     let best: { id: string; count: number } | null = null;
-    resolvedCounts.forEach((count, id) => {
+    for (const [id, count] of resolvedCounts.entries()) {
       if (!best || count > best.count) {
         best = { id, count };
       }
-    });
+    }
     return best?.id ?? null;
   };
 
@@ -4278,17 +4378,22 @@ export default function App() {
       setSelectedConceptId(defaultConcept?.id ?? null);
       setApplyingConceptId(null);
       if (defaultConcept) {
+        setYoutubeTitle(defaultConcept.youtube_title || "");
+        setYoutubeDescription(defaultConcept.youtube_description || "");
         await applyTranscriptCuts(
           words,
           defaultConcept.trimmed_words,
-          defaultConcept.hook
+          defaultConcept.hook,
+          defaultConcept.emojis
         );
       }
     } else {
       setConceptChoices([]);
       setSelectedConceptId(null);
       setApplyingConceptId(null);
-      await applyTranscriptCuts(words, refinement.trimmed_words, refinement.hook);
+      setYoutubeTitle(refinement.youtube_title || "");
+      setYoutubeDescription(refinement.youtube_description || "");
+      await applyTranscriptCuts(words, refinement.trimmed_words, refinement.hook, refinement.emojis);
     }
   };
 
@@ -4406,9 +4511,9 @@ export default function App() {
       setSpeakerSnippets(parsed.speakerSnippets);
       setSpeakerThumbnails(resolvedThumbnails);
       setSpeakerFaceSlots(resolvedSlots);
-      const primarySlots =
-        (resolvedPrimarySpeakerId && resolvedSlots[resolvedPrimarySpeakerId]) ??
-        [];
+      const primarySlots = resolvedPrimarySpeakerId
+        ? (resolvedSlots[resolvedPrimarySpeakerId] ?? [])
+        : [];
       setPrimaryFaceSlots(primarySlots);
       const optionFaces = resolvedPrimarySpeakerId
         ? resolvedThumbnails
@@ -4561,8 +4666,9 @@ export default function App() {
     setSpeakerFaceSlots(faceSlotsBySpeaker);
     setSpeakerThumbnails(thumbnails);
     setSpeakerAssignedThumbnails({});
-    const primarySlots =
-      (primarySpeakerId && faceSlotsBySpeaker[primarySpeakerId]) ?? [];
+    const primarySlots = primarySpeakerId
+      ? (faceSlotsBySpeaker[primarySpeakerId] ?? [])
+      : [];
     setPrimaryFaceSlots(primarySlots);
     const optionFaces = primarySpeakerId
       ? thumbnails
@@ -4893,25 +4999,25 @@ export default function App() {
           };
         }
 
+        const finalPreload = preloadResult;
         await cachePreloadSnapshot({
           words,
           refinement,
           refinementMode,
           desiredVariants,
           snippets,
-          preload: preloadResult,
+          preload: finalPreload,
         });
-        setSpeakerFaceSlots(preloadResult.faceSlotsBySpeaker);
-        setSpeakerThumbnails(preloadResult.thumbnails);
-        const primarySlots =
-          (preloadResult.primarySpeakerId &&
-            preloadResult.faceSlotsBySpeaker[preloadResult.primarySpeakerId]) ??
-          [];
+        setSpeakerFaceSlots(finalPreload.faceSlotsBySpeaker);
+        setSpeakerThumbnails(finalPreload.thumbnails);
+        const primarySlots = finalPreload.primarySpeakerId
+          ? (finalPreload.faceSlotsBySpeaker[finalPreload.primarySpeakerId] ?? [])
+          : [];
         setPrimaryFaceSlots(primarySlots);
-        const optionFaces = preloadResult.primarySpeakerId
-          ? preloadResult.thumbnails
+        const optionFaces = finalPreload.primarySpeakerId
+          ? finalPreload.thumbnails
               .filter(
-                (thumb) => thumb.speakerId === preloadResult.primarySpeakerId
+                (thumb) => thumb.speakerId === finalPreload.primarySpeakerId
               )
               .sort((a, b) => a.slotIndex - b.slotIndex)
           : [];
@@ -5008,7 +5114,9 @@ export default function App() {
     setApplyingConceptId(concept.id);
     setAutoProcessingError(null);
     try {
-      await applyTranscriptCuts(words, concept.trimmed_words, concept.hook);
+      setYoutubeTitle(concept.youtube_title || "");
+      setYoutubeDescription(concept.youtube_description || "");
+      await applyTranscriptCuts(words, concept.trimmed_words, concept.hook, concept.emojis);
       setSelectedConceptId(concept.id);
     } catch (error) {
       console.error("Failed to apply concept", error);
@@ -5312,8 +5420,15 @@ export default function App() {
     words: TranscriptWord[]
   ): CaptionSegment[] => {
     if (!words.length) return [];
-    const getCaptionText = (entries: TranscriptWord[]) =>
-      entries.map((entry) => entry.text).join(" ").trim();
+    const isHormozi = captionsStyle === "hormozi";
+    const maxWords = isHormozi ? 2 : CAPTION_MAX_WORDS;
+    const maxCharCount = isHormozi ? 20 : CAPTION_MAX_CHARACTERS;
+    const maxDuration = isHormozi ? 1.5 : CAPTION_MAX_DURATION;
+
+    const getCaptionText = (entries: TranscriptWord[]) => {
+      const rawText = entries.map((entry) => entry.text).join(" ").trim();
+      return isHormozi ? rawText.toUpperCase() : rawText;
+    };
     const getCharCount = (entries: TranscriptWord[]) =>
       entries.reduce(
         (total, entry, index) =>
@@ -5326,9 +5441,9 @@ export default function App() {
       return Math.max(0, end - start);
     };
     const fitsWithinLimits = (entries: TranscriptWord[]) =>
-      entries.length <= CAPTION_MAX_WORDS &&
-      getCharCount(entries) <= CAPTION_MAX_CHARACTERS &&
-      getDuration(entries) <= CAPTION_MAX_DURATION;
+      entries.length <= maxWords &&
+      getCharCount(entries) <= maxCharCount &&
+      getDuration(entries) <= maxDuration;
     const isSentenceEnd = (word: TranscriptWord) =>
       SENTENCE_END_REGEX.test(word.text.trim());
     const isSoftBreakWord = (word: TranscriptWord) =>
@@ -5399,9 +5514,9 @@ export default function App() {
           }
 
           if (
-            wordCount > CAPTION_MAX_WORDS ||
-            charCount > CAPTION_MAX_CHARACTERS ||
-            duration > CAPTION_MAX_DURATION
+            wordCount > maxWords ||
+            charCount > maxCharCount ||
+            duration > maxDuration
           ) {
             break;
           }
@@ -5578,7 +5693,7 @@ export default function App() {
       return;
     }
     const entries = runtimeEngine.block.getChildren(trackId) ?? [];
-    entries.forEach((entry) => {
+    entries.forEach((entry: number) => {
       if (runtimeEngine.block.isValid(entry)) {
         runtimeEngine.block.destroy(entry);
       }
@@ -5822,8 +5937,12 @@ export default function App() {
     if (!engine) return;
     if (!words.length) {
       clearCaptionsTrack(engine);
+      mappedRefinedWordsRef.current = [];
       return;
     }
+    captionStyleAppliedRef.current = false;
+    captionPresetAppliedRef.current = false;
+    
     const trackId = ensureCaptionsTrack(engine);
     if (!trackId) return;
     const shouldRetime = options?.retime ?? false;
@@ -5834,6 +5953,8 @@ export default function App() {
     const mappedWords = options?.rangeMappings?.length
       ? mapWordsToTimeline(mappedSourceWords, options.rangeMappings)
       : mappedSourceWords;
+    mappedRefinedWordsRef.current = mappedWords;
+
     const baseWords = shouldRetime
       ? retimeWordsSequentially(mappedWords)
       : mappedWords;
@@ -5887,6 +6008,38 @@ export default function App() {
     );
     apply(() => engine.block.setDouble(captionId, "caption/maxAutomaticFontSize", 100), "min font size");
     apply(() => engine.block.setDouble(captionId, "caption/minAutomaticFontSize", 1), "max font size");
+
+    // Hormozi Custom Style vs Standard Style
+    if (captionsStyle === "hormozi") {
+      // Yellow text
+      apply(() => {
+        try { engine.block.setTextColor(captionId, { r: 1, g: 1, b: 0, a: 1 }); } catch (e) {}
+        try { engine.block.setColor(captionId, "textColor", { r: 1, g: 1, b: 0, a: 1 }); } catch (e) {}
+        try { engine.block.setColor(captionId, "caption/textColor", { r: 1, g: 1, b: 0, a: 1 }); } catch (e) {}
+      }, "hormozi text color");
+
+      // Heavy outline
+      apply(() => {
+        try { engine.block.setDouble(captionId, "caption/outlineWidth", 6); } catch (e) {}
+        try { engine.block.setDouble(captionId, "caption/strokeWidth", 6); } catch (e) {}
+        try { engine.block.setColor(captionId, "caption/strokeColor", { r: 0, g: 0, b: 0, a: 1 }); } catch (e) {}
+      }, "hormozi outline");
+    } else {
+      // White text
+      apply(() => {
+        try { engine.block.setTextColor(captionId, { r: 1, g: 1, b: 1, a: 1 }); } catch (e) {}
+        try { engine.block.setColor(captionId, "textColor", { r: 1, g: 1, b: 1, a: 1 }); } catch (e) {}
+        try { engine.block.setColor(captionId, "caption/textColor", { r: 1, g: 1, b: 1, a: 1 }); } catch (e) {}
+      }, "standard text color");
+      
+      // Standard outline
+      apply(() => {
+        try { engine.block.setDouble(captionId, "caption/outlineWidth", 3); } catch (e) {}
+        try { engine.block.setDouble(captionId, "caption/strokeWidth", 3); } catch (e) {}
+        try { engine.block.setColor(captionId, "caption/strokeColor", { r: 0, g: 0, b: 0, a: 1 }); } catch (e) {}
+      }, "standard outline");
+    }
+
     captionStyleAppliedRef.current = true;
   };
 
@@ -5914,7 +6067,8 @@ export default function App() {
   const applyTranscriptCuts = async (
     sourceWords: TranscriptWord[],
     refinedWords: TranscriptWord[],
-    hookText?: string | null
+    hookText?: string | null,
+    emojis?: GeminiEmoji[] | null
   ) => {
     const engine = engineRef.current;
     if (!engine || !sourceWords.length || !refinedWords.length) return;
@@ -6015,13 +6169,13 @@ export default function App() {
     const shouldUseTemplate =
       templateId !== "none" &&
       templateId !== "solo" &&
-      canApplySpeakerTemplate();
+      (templateId === "split-gameplay" || canApplySpeakerTemplate());
     clearTemplateLayout(engine, {
       showBase: !shouldUseTemplate,
     });
 
     const existingChildren = engine.block.getChildren(trackId) ?? [];
-    existingChildren.forEach((child) => {
+    existingChildren.forEach((child: number) => {
       if (engine.block.isValid(child)) {
         engine.block.destroy(child);
       }
@@ -6153,6 +6307,272 @@ export default function App() {
     }
   };
 
+  const applyProgressBar = (engine: CreativeEngineInstance, duration: number) => {
+    progressBarBlockIdsRef.current.forEach((id) => {
+      if (engine.block.isValid(id)) {
+        try { engine.block.destroy(id); } catch(e) {}
+      }
+    });
+    progressBarBlockIdsRef.current = [];
+
+    const pageId = pageRef.current;
+    if (!pageId || !engine.block.isValid(pageId)) return;
+
+    const totalBlocks = 40;
+    const blockWidthPercent = 1.0 / totalBlocks;
+    const blockHeightPercent = 0.012;
+    const posYPercent = 0.988;
+    const color = { r: 0.95, g: 0.15, b: 0.45, a: 1 };
+
+    for (let i = 0; i < totalBlocks; i++) {
+      try {
+        const blockId = engine.block.create("graphic");
+        engine.block.setShape(blockId, engine.block.createShape("rect"));
+        const fillId = engine.block.createFill("color");
+        engine.block.setFill(blockId, fillId);
+        engine.block.setColor(fillId, "fill/color/value", color);
+        
+        const posXPercent = i * blockWidthPercent;
+        engine.block.setWidthMode(blockId, "Percent");
+        engine.block.setHeightMode(blockId, "Percent");
+        engine.block.setWidth(blockId, blockWidthPercent);
+        engine.block.setHeight(blockId, blockHeightPercent);
+        
+        engine.block.setPositionXMode(blockId, "Percent");
+        engine.block.setPositionYMode(blockId, "Percent");
+        engine.block.setPositionX(blockId, posXPercent);
+        engine.block.setPositionY(blockId, posYPercent);
+
+        const timeOffset = (i / totalBlocks) * duration;
+        const blockDuration = duration - timeOffset;
+        engine.block.setDuration(blockId, blockDuration);
+        if (engine.block.supportsTimeOffset(blockId)) {
+          engine.block.setTimeOffset(blockId, timeOffset);
+        }
+
+        engine.block.setBool(blockId, "alwaysOnTop", true);
+        engine.block.setBool(blockId, "includedInExport", true);
+        engine.block.setBool(blockId, "selectionEnabled", false);
+        engine.block.setBool(blockId, "transformLocked", true);
+        disableBlockHighlight(engine, blockId);
+
+        engine.block.appendChild(pageId, blockId);
+        progressBarBlockIdsRef.current.push(blockId);
+      } catch (error) {
+        console.warn("Failed to create progress bar block index " + i, error);
+      }
+    }
+  };
+
+  const applyBackgroundMusic = async (engine: CreativeEngineInstance, duration: number) => {
+    if (bgMusicBlockRef.current && engine.block.isValid(bgMusicBlockRef.current)) {
+      try { engine.block.destroy(bgMusicBlockRef.current); } catch(e) {}
+    }
+    bgMusicBlockRef.current = null;
+
+    const pageId = pageRef.current;
+    if (!pageId || !engine.block.isValid(pageId)) return;
+
+    try {
+      const audioId = engine.block.create("audio");
+      engine.block.setString(audioId, "audio/uri", "/music/background.mp3");
+      engine.block.setDuration(audioId, duration);
+      
+      try { engine.block.setBool(audioId, "audio/loop", true); } catch(e) {}
+      try { engine.block.setBool(audioId, "playback/loop", true); } catch(e) {}
+      try { engine.block.setDouble(audioId, "audio/volume", 0.08); } catch(e) {}
+      try { engine.block.setDouble(audioId, "playback/volume", 0.08); } catch(e) {}
+      isMusicDuckedRef.current = true;
+
+      engine.block.appendChild(pageId, audioId);
+      bgMusicBlockRef.current = audioId;
+    } catch (error) {
+      console.warn("Failed to create background music block", error);
+    }
+  };
+
+  const applyEmojiOverlays = (
+    engine: CreativeEngineInstance,
+    emojis: GeminiEmoji[],
+    refinedWords: TranscriptWord[]
+  ) => {
+    emojiBlockIdsRef.current.forEach((id) => {
+      if (engine.block.isValid(id)) {
+        try { engine.block.destroy(id); } catch(e) {}
+      }
+    });
+    emojiBlockIdsRef.current = [];
+
+    const pageId = pageRef.current;
+    if (!pageId || !engine.block.isValid(pageId) || !emojis.length) return;
+
+    const baseWords = mappedRefinedWordsRef.current.length === refinedWords.length
+      ? mappedRefinedWordsRef.current
+      : refinedWords;
+
+    emojis.forEach((emojiItem, idx) => {
+      const word = baseWords[emojiItem.word_index];
+      if (!word) return;
+
+      try {
+        const textId = engine.block.create("text");
+        engine.block.replaceText(textId, emojiItem.emoji);
+        
+        engine.block.setEnum(textId, "text/horizontalAlignment", "Center");
+        engine.block.setEnum(textId, "text/verticalAlignment", "Center");
+        engine.block.setBool(textId, "text/automaticFontSizeEnabled", true);
+        engine.block.setDouble(textId, "text/minAutomaticFontSize", 10);
+        engine.block.setDouble(textId, "text/maxAutomaticFontSize", 120);
+
+        engine.block.setWidthMode(textId, "Percent");
+        engine.block.setHeightMode(textId, "Percent");
+        engine.block.setWidth(textId, 0.40);
+        engine.block.setHeight(textId, 0.20);
+        
+        engine.block.setPositionXMode(textId, "Percent");
+        engine.block.setPositionYMode(textId, "Percent");
+        engine.block.setPositionX(textId, 0.30);
+        engine.block.setPositionY(textId, 0.40);
+
+        const start = word.start ?? 0;
+        const duration = emojiItem.duration || 1.5;
+        engine.block.setDuration(textId, duration);
+        if (engine.block.supportsTimeOffset(textId)) {
+          engine.block.setTimeOffset(textId, start);
+        }
+
+        engine.block.setBool(textId, "alwaysOnTop", true);
+        engine.block.setBool(textId, "includedInExport", true);
+        engine.block.setBool(textId, "selectionEnabled", false);
+        engine.block.setBool(textId, "transformLocked", true);
+        disableBlockHighlight(engine, textId);
+
+        engine.block.appendChild(pageId, textId);
+        emojiBlockIdsRef.current.push(textId);
+      } catch (error) {
+        console.warn("Failed to create emoji block " + idx, error);
+      }
+    });
+  };
+
+  const handleYoutubeUpload = async () => {
+    if (isUploadingToYoutube) return;
+    const engine = engineRef.current;
+    const pageId = pageRef.current;
+    if (!engine || !pageId || !engine.block.isValid(pageId)) {
+      alert("Video is not ready to upload yet.");
+      return;
+    }
+
+    setIsUploadingToYoutube(true);
+    setYoutubeUploadResult(null);
+
+    try {
+      // 1. Get signed Cloudinary signature details
+      const sigRes = await fetch("/api/cloudinary-signature");
+      if (!sigRes.ok) {
+        throw new Error("Failed to generate upload signature");
+      }
+      const sigData = await sigRes.json();
+      if (sigData.error) {
+        throw new Error(sigData.error);
+      }
+
+      // 2. Export video to blob in-browser
+      const blob = await engine.block.exportVideo(pageId, {
+        mimeType: "video/mp4",
+      });
+
+      // 3. Upload video directly to Cloudinary using FormData
+      const formData = new FormData();
+      formData.append("file", blob, "short-video.mp4");
+      formData.append("api_key", sigData.apiKey);
+      formData.append("timestamp", sigData.timestamp);
+      formData.append("signature", sigData.signature);
+      formData.append("folder", "youtube-shorts");
+
+      const uploadRes = await fetch(
+        `https://api.cloudinary.com/v1_1/${sigData.cloudName}/video/upload`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      if (!uploadRes.ok) {
+        const errText = await uploadRes.text();
+        throw new Error(`Cloudinary direct upload failed: ${errText}`);
+      }
+
+      const uploadData = await uploadRes.json();
+      const videoUrl = uploadData.secure_url;
+      const publicId = uploadData.public_id;
+
+      // 4. Call serverless Next.js API to upload to YouTube & delete from Cloudinary
+      const ytRes = await fetch("/api/youtube-upload", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          videoUrl,
+          publicId,
+          title: youtubeTitle || "My YouTube Short",
+          description: youtubeDescription || "",
+        }),
+      });
+
+      if (!ytRes.ok) {
+        const ytErr = await ytRes.json();
+        throw new Error(ytErr.error || ytErr.detail || "YouTube Shorts API upload failed");
+      }
+
+      const ytData = await ytRes.json();
+      setYoutubeUploadResult({
+        success: true,
+        videoId: ytData.videoId,
+        url: ytData.url,
+      });
+    } catch (err: any) {
+      console.error("Direct YouTube Shorts upload flow failed:", err);
+      setYoutubeUploadResult({
+        success: false,
+        error: err.message || "Direct upload flow failed",
+      });
+    } finally {
+      setIsUploadingToYoutube(false);
+    }
+  };
+
+  const handleConnectYoutube = () => {
+    const width = 600;
+    const height = 700;
+    const left = window.screen.width / 2 - width / 2;
+    const top = window.screen.height / 2 - height / 2;
+    const popup = window.open(
+      "/api/auth/youtube",
+      "youtube-auth-popup",
+      `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes,scrollbars=yes`
+    );
+
+    if (popup) {
+      const timer = setInterval(async () => {
+        if (popup.closed) {
+          clearInterval(timer);
+          try {
+            const res = await fetch("/api/auth/youtube-status");
+            if (res.ok) {
+              const data = await res.json();
+              setYoutubeAuth(data);
+            }
+          } catch (err) {
+            console.error("Failed to fetch YouTube auth status", err);
+          }
+        }
+      }, 1000);
+    }
+  };
+
   const getTranscriptWordsSnapshot = (): TranscriptWord[] => {
     if (currentTranscriptWords.length) {
       return currentTranscriptWords;
@@ -6215,15 +6635,16 @@ export default function App() {
     (autoProcessStatuses.preload === "active" || isSpeakerIdentificationActive);
   const isWorkflowProcessing =
     autoProcessing || isExtracting || isTranscribing || isSpeakerIdentificationActive;
-  const showTrimStage = hasVideo && (!hasStartedWorkflow || autoProcessingError);
+  const showTrimStage = Boolean(hasVideo && (!hasStartedWorkflow || autoProcessingError));
   const showProcessingStage =
     hasVideo && hasStartedWorkflow && isWorkflowProcessing;
   const showFaceDetectionInCard = isFaceDetectionActive;
-  const showResultStage =
+  const showResultStage = Boolean(
     hasVideo &&
     hasStartedWorkflow &&
     !isWorkflowProcessing &&
-    !autoProcessingError;
+    !autoProcessingError
+  );
   const showUploadStage = !hasVideo;
   const showSetupStage = !showProcessingStage && !showResultStage;
   const showInlinePreview = showSetupStage;
@@ -6254,6 +6675,8 @@ export default function App() {
     if (option.id === "none") return true;
     // "solo" is available with 1+ speakers
     if (option.id === "solo") return uniqueAssignedSlots.size >= 1;
+    // "split-gameplay" is available with 1+ speakers
+    if (option.id === "split-gameplay") return uniqueAssignedSlots.size >= 1;
     // "multi" requires 2+ speakers
     if (option.id === "multi") return uniqueAssignedSlots.size >= 2;
     // Other templates (sidecar, overlay, etc.) require 2+ speakers
@@ -6351,6 +6774,13 @@ export default function App() {
       thumbnails: getSpeakerPreviewThumbnails(speakerId),
     }));
   };
+  const activeRefinedWords = (() => {
+    if (selectedConceptId && conceptChoices.length) {
+      const match = conceptChoices.find((c) => c.id === selectedConceptId);
+      if (match) return match.trimmed_words;
+    }
+    return lastRefinementRef.current?.trimmed_words ?? [];
+  })();
   const conceptSpeakerPreviews: Record<string, SpeakerPreview[]> = {};
   conceptChoices.forEach((concept) => {
     const trimmedWords = concept.trimmed_words ?? [];
@@ -6428,6 +6858,111 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const authStatus = params.get("youtube_auth");
+      if (authStatus === "success") {
+        alert("Successfully authenticated with YouTube!");
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (authStatus === "failed" || authStatus === "error") {
+        const msg = params.get("msg");
+        alert("YouTube authentication failed: " + msg);
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
+
+    const checkAuthStatus = async () => {
+      try {
+        const res = await fetch("/api/auth/youtube-status");
+        if (res.ok) {
+          const data = await res.json();
+          setYoutubeAuth(data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch YouTube auth status", err);
+      }
+    };
+    checkAuthStatus();
+
+    const handleAuthMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === "YOUTUBE_AUTH_STATUS") {
+        const { status, message } = event.data;
+        if (status === "success") {
+          alert("Successfully authenticated with YouTube!");
+        } else {
+          alert("YouTube authentication failed: " + message);
+        }
+        checkAuthStatus();
+      }
+    };
+
+    window.addEventListener("message", handleAuthMessage);
+    return () => {
+      window.removeEventListener("message", handleAuthMessage);
+    };
+  }, []);
+
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    if (progressBarEnabled && showResultStage && timelineDuration) {
+      applyProgressBar(engine, timelineDuration);
+    } else {
+      progressBarBlockIdsRef.current.forEach((id) => {
+        if (engine.block.isValid(id)) {
+          try { engine.block.destroy(id); } catch(e) {}
+        }
+      });
+      progressBarBlockIdsRef.current = [];
+    }
+  }, [progressBarEnabled, showResultStage, timelineDuration, isEngineReady]);
+
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    if (bgMusicEnabled && showResultStage && timelineDuration) {
+      void applyBackgroundMusic(engine, timelineDuration);
+    } else {
+      if (bgMusicBlockRef.current && engine.block.isValid(bgMusicBlockRef.current)) {
+        try { engine.block.destroy(bgMusicBlockRef.current); } catch(e) {}
+      }
+      bgMusicBlockRef.current = null;
+    }
+  }, [bgMusicEnabled, showResultStage, timelineDuration, isEngineReady]);
+
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    if (emojisEnabled && showResultStage && activeRefinedWords && activeRefinedWords.length) {
+      const concept = conceptChoices.find(c => c.id === (applyingConceptId || selectedConceptId));
+      const activeEmojis = concept?.emojis ?? lastRefinementRef.current?.emojis ?? [];
+      applyEmojiOverlays(engine, activeEmojis, activeRefinedWords);
+    } else {
+      emojiBlockIdsRef.current.forEach((id) => {
+        if (engine.block.isValid(id)) {
+          try { engine.block.destroy(id); } catch(e) {}
+        }
+      });
+      emojiBlockIdsRef.current = [];
+    }
+  }, [emojisEnabled, showResultStage, selectedConceptId, activeRefinedWords, isEngineReady]);
+
+  useEffect(() => {
+    if (!showResultStage || !activeRefinedWords || !activeRefinedWords.length || !isEngineReady) return;
+    applyCaptionsForWords(activeRefinedWords, {
+      rangeMappings: timelineSegments.map((seg, idx) => {
+        const range = clipRangesRef.current[idx];
+        return {
+          start: range?.start ?? 0,
+          end: range?.end ?? 0,
+          timelineStart: seg.start
+        };
+      }),
+      sourceWords: currentTranscriptWords
+    });
+  }, [captionsStyle, showResultStage, isEngineReady, activeRefinedWords, timelineSegments, currentTranscriptWords]);
+
+  useEffect(() => {
     applyCaptionVisibility(captionsEnabled);
   }, [applyCaptionVisibility, captionsEnabled]);
 
@@ -6485,7 +7020,7 @@ export default function App() {
     if (!engine || !pageId) return;
 
     const zoomToPage = () => {
-      engine.scene.zoomToBlock(pageId, { padding: 0 }).catch((error) => {
+      engine.scene.zoomToBlock(pageId, { padding: 0 }).catch((error: any) => {
         console.warn("Failed to zoom after result layout", error);
       });
     };
@@ -6901,8 +7436,252 @@ export default function App() {
                                 />
                               </button>
                             </div>
+                            <div className="flex items-center justify-between gap-3 pt-1 border-t border-border/40">
+                              <span className="text-sm text-muted-foreground">
+                                Caption Style
+                              </span>
+                              <div className="flex rounded-lg bg-muted p-0.5 text-xs">
+                                <button
+                                  type="button"
+                                  onClick={() => setCaptionsStyle("standard")}
+                                  className={`rounded-md px-2.5 py-1 transition-all ${
+                                    captionsStyle === "standard"
+                                      ? "bg-background text-foreground shadow-sm"
+                                      : "text-muted-foreground hover:text-foreground"
+                                  }`}
+                                >
+                                  Standard
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setCaptionsStyle("hormozi")}
+                                  className={`rounded-md px-2.5 py-1 transition-all ${
+                                    captionsStyle === "hormozi"
+                                      ? "bg-background text-foreground shadow-sm animate-pulse"
+                                      : "text-muted-foreground hover:text-foreground"
+                                  }`}
+                                >
+                                  🔥 Hormozi
+                                </button>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between gap-3 pt-1 border-t border-border/40">
+                              <div className="flex flex-col">
+                                <span className="text-sm text-muted-foreground">
+                                  Lofi Background Music
+                                </span>
+                                <span className="text-[10px] text-muted-foreground/80">
+                                  With Speech Auto-Ducking
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={bgMusicEnabled}
+                                onClick={() =>
+                                  setBgMusicEnabled((prev) => !prev)
+                                }
+                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                                  bgMusicEnabled
+                                    ? "bg-primary"
+                                    : "bg-muted"
+                                }`}
+                              >
+                                <span
+                                  className={`inline-block h-4 w-4 rounded-full bg-background shadow transition ${
+                                    bgMusicEnabled
+                                      ? "translate-x-6"
+                                      : "translate-x-1"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                            <div className="flex items-center justify-between gap-3 pt-1 border-t border-border/40">
+                              <span className="text-sm text-muted-foreground">
+                                Retention Progress Bar
+                              </span>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={progressBarEnabled}
+                                onClick={() =>
+                                  setProgressBarEnabled((prev) => !prev)
+                                }
+                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                                  progressBarEnabled
+                                    ? "bg-primary"
+                                    : "bg-muted"
+                                }`}
+                              >
+                                <span
+                                  className={`inline-block h-4 w-4 rounded-full bg-background shadow transition ${
+                                    progressBarEnabled
+                                      ? "translate-x-6"
+                                      : "translate-x-1"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+                            <div className="flex items-center justify-between gap-3 pt-1 border-t border-border/40">
+                              <span className="text-sm text-muted-foreground">
+                                Auto Emoji Overlays
+                              </span>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={emojisEnabled}
+                                onClick={() =>
+                                  setEmojisEnabled((prev) => !prev)
+                                }
+                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                                  emojisEnabled
+                                    ? "bg-primary"
+                                    : "bg-muted"
+                                }`}
+                              >
+                                <span
+                                  className={`inline-block h-4 w-4 rounded-full bg-background shadow transition ${
+                                    emojisEnabled
+                                      ? "translate-x-6"
+                                      : "translate-x-1"
+                                  }`}
+                                />
+                              </button>
+                            </div>
                           </div>
                         </div>
+                      </div>
+
+                      {/* YouTube Shorts Upload Panel */}
+                      <div className="rounded-xl border bg-card p-4 space-y-3">
+                        <div className="flex items-center justify-between border-b pb-2">
+                          <p className="text-sm font-semibold text-foreground flex items-center gap-1.5 flex-row">
+                            <svg className="h-4 w-4 text-red-600 fill-current animate-pulse shrink-0" viewBox="0 0 24 24">
+                              <path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.11C19.518 3.545 12 3.545 12 3.545s-7.518 0-9.388.508a3.003 3.003 0 0 0-2.11 2.11C0 8.033 0 12 0 12s0 3.967.502 5.837a3.003 3.003 0 0 0 2.11 2.11c1.87.508 9.388.508 9.388.508s7.518 0 9.388-.508a3.003 3.003 0 0 0 2.11-2.11C24 15.967 24 12 24 12s0-3.967-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                            </svg>
+                            YouTube Shorts publisher
+                          </p>
+                          {youtubeAuth.authenticated ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-500 whitespace-nowrap">
+                              Connected
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-500 whitespace-nowrap">
+                              Disconnected
+                            </span>
+                          )}
+                        </div>
+
+                        {youtubeAuth.authenticated ? (
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2 rounded-lg bg-muted/40 p-2 text-xs">
+                              {youtubeAuth.channelThumbnail && (
+                                <img
+                                  src={youtubeAuth.channelThumbnail}
+                                  alt="Channel thumbnail"
+                                  className="h-6 w-6 rounded-full border shrink-0"
+                                />
+                              )}
+                              <div className="flex-1 truncate">
+                                <p className="font-semibold text-foreground truncate">
+                                  {youtubeAuth.channelTitle || "Connected Channel"}
+                                </p>
+                                <p className="text-[10px] text-muted-foreground">Ready to upload shorts</p>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <label className="text-xs font-medium text-foreground">
+                                Viral Title
+                              </label>
+                              <input
+                                type="text"
+                                value={youtubeTitle}
+                                onChange={(e) => setYoutubeTitle(e.target.value)}
+                                placeholder="Enter short video title (must contain #Shorts)"
+                                maxLength={100}
+                                className="flex h-8 w-full rounded-md border border-input bg-transparent px-3 py-1 text-xs shadow-sm transition-colors file:border-0 file:bg-transparent file:text-xs file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 bg-muted/20 text-foreground"
+                              />
+                              <p className="text-[10px] text-muted-foreground text-right">
+                                {youtubeTitle.length}/100
+                              </p>
+                            </div>
+
+                            <div className="space-y-2">
+                              <label className="text-xs font-medium text-foreground">
+                                Viral Description
+                              </label>
+                              <textarea
+                                value={youtubeDescription}
+                                onChange={(e) => setYoutubeDescription(e.target.value)}
+                                placeholder="Enter viral description with hashtags"
+                                rows={3}
+                                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 bg-muted/20 text-foreground"
+                              />
+                            </div>
+
+                            <Button
+                              type="button"
+                              onClick={handleYoutubeUpload}
+                              disabled={isUploadingToYoutube}
+                              className="w-full bg-red-600 text-white hover:bg-red-700 h-9 font-semibold text-xs flex items-center justify-center gap-1.5 shadow-md"
+                            >
+                              {isUploadingToYoutube ? (
+                                <>
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  Uploading Short to YouTube...
+                                </>
+                              ) : (
+                                <>
+                                  <UploadCloud className="h-3.5 w-3.5" />
+                                  Publish to YouTube Shorts
+                                </>
+                              )}
+                            </Button>
+
+                            {youtubeUploadResult && (
+                              <div
+                                className={`rounded-lg p-3 text-xs ${
+                                  youtubeUploadResult.success
+                                    ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-500"
+                                    : "bg-destructive/10 border border-destructive/30 text-destructive"
+                                }`}
+                              >
+                                {youtubeUploadResult.success ? (
+                                  <div className="space-y-1.5">
+                                    <p className="font-semibold">🎉 Upload successful!</p>
+                                    <a
+                                      href={youtubeUploadResult.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="underline hover:text-foreground font-semibold inline-flex items-center gap-0.5"
+                                    >
+                                      View Short on YouTube &rarr;
+                                    </a>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-1">
+                                    <p className="font-semibold">❌ Upload failed</p>
+                                    <p className="text-[10px] opacity-90">{youtubeUploadResult.error}</p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="space-y-2 text-center py-2">
+                            <p className="text-xs text-muted-foreground">
+                              Connect your YouTube channel to directly publish your short videos.
+                            </p>
+                            <Button
+                              type="button"
+                              onClick={handleConnectYoutube}
+                              className="w-full bg-red-600 text-white hover:bg-red-700 h-9 font-semibold text-xs flex items-center justify-center gap-1.5 shadow-md animate-pulse"
+                            >
+                              Connect YouTube Account
+                            </Button>
+                          </div>
+                        )}
                       </div>
                       <Button
                         type="button"

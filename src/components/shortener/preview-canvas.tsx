@@ -176,9 +176,9 @@ const PreviewCanvas = ({
             isDropActive && !isUploadDisabled ? "border-primary bg-primary/5" : ""
           }`}
           role="button"
-          tabIndex={videoFile || isUploadDisabled ? -1 : 0}
+          tabIndex={videoFile !== null || isUploadDisabled ? -1 : 0}
           aria-disabled={isUploadDisabled}
-          aria-hidden={videoFile}
+          aria-hidden={videoFile !== null ? "true" : undefined}
           onClick={onUploadClick}
           onKeyDown={onUploadKeyDown}
           onDragEnter={onDragEnter}

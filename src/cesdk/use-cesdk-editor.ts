@@ -54,7 +54,7 @@ export const useCesdkEditor = ({
             theme: "dark",
             baseURL: EDITOR_ASSET_BASE_URL,
             sceneMode: "Video",
-          }
+          } as any
         );
         editorInstanceRef.current = editor;
         try {
