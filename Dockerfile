@@ -1,5 +1,5 @@
-# Use a stable Debian-based Node.js image to ensure compatibility with native modules (like tensorflow)
-FROM node:20-bullseye-slim
+# Use a stable Debian-based Node.js image based on Debian Bookworm (which includes Python 3.11+)
+FROM node:20-bookworm-slim
 
 # Install system dependencies: python3, ffmpeg, and curl
 RUN apt-get update && apt-get install -y --no-install-recommends \
