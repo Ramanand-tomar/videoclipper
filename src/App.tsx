@@ -6477,6 +6477,20 @@ export default function App() {
       tempBlobUrl = URL.createObjectURL(videoFile);
     }
 
+    const getSafeStringProperty = (id: number, prop: string): string | null => {
+      try {
+        return engine.block.getString(id, prop);
+      } catch (_) {
+        return null;
+      }
+    };
+
+    const setSafeStringProperty = (id: number, prop: string, val: string) => {
+      try {
+        engine.block.setString(id, prop, val);
+      } catch (_) {}
+    };
+
     try {
       const allBlocks = engine.block.findAll() ?? [];
       for (const blockId of allBlocks) {
@@ -6486,18 +6500,16 @@ export default function App() {
         try {
           const fillId = engine.block.getFill(blockId);
           if (fillId && engine.block.isValid(fillId)) {
-            if (engine.block.hasProperty(fillId, "fill/video/fileURI")) {
-              const uri = engine.block.getString(fillId, "fill/video/fileURI");
-              if (uri) {
-                originalUris[fillId] = uri;
-                if (uri.startsWith("opfs://") && tempBlobUrl) {
-                  engine.block.setString(fillId, "fill/video/fileURI", tempBlobUrl);
-                  console.log(`[Export] Swapped OPFS video fill ${fillId} of block ${blockId} to blob url`);
-                } else if (uri.startsWith("/videos/")) {
-                  const absUrl = window.location.origin + uri;
-                  engine.block.setString(fillId, "fill/video/fileURI", absUrl);
-                  console.log(`[Export] Swapped relative B-roll fill ${fillId} of block ${blockId} to absolute url:`, absUrl);
-                }
+            const uri = getSafeStringProperty(fillId, "fill/video/fileURI");
+            if (uri) {
+              originalUris[fillId] = uri;
+              if (uri.startsWith("opfs://") && tempBlobUrl) {
+                setSafeStringProperty(fillId, "fill/video/fileURI", tempBlobUrl);
+                console.log(`[Export] Swapped OPFS video fill ${fillId} of block ${blockId} to blob url`);
+              } else if (uri.startsWith("/videos/")) {
+                const absUrl = window.location.origin + uri;
+                setSafeStringProperty(fillId, "fill/video/fileURI", absUrl);
+                console.log(`[Export] Swapped relative B-roll fill ${fillId} of block ${blockId} to absolute url:`, absUrl);
               }
             }
           }
@@ -6506,31 +6518,27 @@ export default function App() {
         }
 
         // Also check if the block itself has the property (fallback)
-        if (engine.block.hasProperty(blockId, "fill/video/fileURI")) {
-          const uri = engine.block.getString(blockId, "fill/video/fileURI");
-          if (uri) {
-            originalUris[blockId] = uri;
-            if (uri.startsWith("opfs://") && tempBlobUrl) {
-              engine.block.setString(blockId, "fill/video/fileURI", tempBlobUrl);
-              console.log(`[Export] Swapped OPFS block ${blockId} directly to blob url`);
-            } else if (uri.startsWith("/videos/")) {
-              const absUrl = window.location.origin + uri;
-              engine.block.setString(blockId, "fill/video/fileURI", absUrl);
-              console.log(`[Export] Swapped relative video block ${blockId} directly to absolute url:`, absUrl);
-            }
+        const blockUri = getSafeStringProperty(blockId, "fill/video/fileURI");
+        if (blockUri) {
+          originalUris[blockId] = blockUri;
+          if (blockUri.startsWith("opfs://") && tempBlobUrl) {
+            setSafeStringProperty(blockId, "fill/video/fileURI", tempBlobUrl);
+            console.log(`[Export] Swapped OPFS block ${blockId} directly to blob url`);
+          } else if (blockUri.startsWith("/videos/")) {
+            const absUrl = window.location.origin + blockUri;
+            setSafeStringProperty(blockId, "fill/video/fileURI", absUrl);
+            console.log(`[Export] Swapped relative video block ${blockId} directly to absolute url:`, absUrl);
           }
         }
 
         // Check for audio URI property
-        if (engine.block.hasProperty(blockId, "audio/uri")) {
-          const uri = engine.block.getString(blockId, "audio/uri");
-          if (uri) {
-            originalUris[blockId] = uri;
-            if (uri.startsWith("/music/")) {
-              const absUrl = window.location.origin + uri;
-              engine.block.setString(blockId, "audio/uri", absUrl);
-              console.log(`[Export] Swapped relative audio block ${blockId} to absolute url:`, absUrl);
-            }
+        const audioUri = getSafeStringProperty(blockId, "audio/uri");
+        if (audioUri) {
+          originalUris[blockId] = audioUri;
+          if (audioUri.startsWith("/music/")) {
+            const absUrl = window.location.origin + audioUri;
+            setSafeStringProperty(blockId, "audio/uri", absUrl);
+            console.log(`[Export] Swapped relative audio block ${blockId} to absolute url:`, absUrl);
           }
         }
       }
@@ -6542,16 +6550,22 @@ export default function App() {
   };
 
   const restoreUrisAfterExport = (engine: any, originalUris: Record<number, string>, tempBlobUrl: string | null) => {
+    const setSafeStringProperty = (id: number, prop: string, val: string) => {
+      try {
+        engine.block.setString(id, prop, val);
+      } catch (_) {}
+    };
+
     for (const [idStr, originalUri] of Object.entries(originalUris)) {
       const id = parseInt(idStr, 10);
       try {
         if (engine.block.isValid(id)) {
-          if (engine.block.hasProperty(id, "fill/video/fileURI")) {
-            engine.block.setString(id, "fill/video/fileURI", originalUri);
-            console.log(`[Export] Restored video block/fill ${id} URI`);
-          } else if (engine.block.hasProperty(id, "audio/uri")) {
-            engine.block.setString(id, "audio/uri", originalUri);
-            console.log(`[Export] Restored audio block ${id} URI`);
+          if (originalUri.startsWith("opfs://") || originalUri.startsWith("/videos/")) {
+            setSafeStringProperty(id, "fill/video/fileURI", originalUri);
+            console.log(`[Export] Restored video block/fill ${id} URI to ${originalUri}`);
+          } else if (originalUri.startsWith("/music/")) {
+            setSafeStringProperty(id, "audio/uri", originalUri);
+            console.log(`[Export] Restored audio block ${id} URI to ${originalUri}`);
           }
         }
       } catch (err) {
