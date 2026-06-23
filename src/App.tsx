@@ -251,6 +251,9 @@ export default function App() {
   const [importScriptText, setImportScriptText] = useState("");
   const [importScriptError, setImportScriptError] = useState<string | null>(null);
   const [isImportingScript, setIsImportingScript] = useState(false);
+  const [ytUrl, setYtUrl] = useState("");
+  const [isDownloadingYt, setIsDownloadingYt] = useState(false);
+  const [ytDownloadError, setYtDownloadError] = useState<string | null>(null);
   const [captionDebug, setCaptionDebug] = useState<
     Record<string, CaptionSegment[]> | null
   >(null);
@@ -3633,6 +3636,54 @@ export default function App() {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       fileInputRef.current?.click();
+    }
+  };
+
+  const handleYoutubeImport = async () => {
+    if (!ytUrl.trim()) {
+      setYtDownloadError("Please enter a YouTube video URL.");
+      return;
+    }
+    
+    setIsDownloadingYt(true);
+    setYtDownloadError(null);
+    
+    try {
+      const response = await fetch("/api/download-youtube", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url: ytUrl.trim() }),
+      });
+      
+      if (!response.ok) {
+        let errData;
+        try {
+          errData = await response.json();
+        } catch (_) {}
+        throw new Error(errData?.error || errData?.detail || `Server responded with ${response.status}`);
+      }
+      
+      const blob = await response.blob();
+      
+      // Extract video ID or generate name
+      let filename = "youtube-video.mp4";
+      const ytIdMatch = ytUrl.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i);
+      if (ytIdMatch && ytIdMatch[1]) {
+        filename = `youtube-${ytIdMatch[1]}.mp4`;
+      }
+      
+      const file = new File([blob], filename, { type: "video/mp4" });
+      
+      // Load file into editor
+      await loadVideoFile(file);
+      setYtUrl(""); // Clear input on success
+    } catch (err: any) {
+      console.error("YouTube download error:", err);
+      setYtDownloadError(err.message || String(err));
+    } finally {
+      setIsDownloadingYt(false);
     }
   };
 
@@ -7368,7 +7419,48 @@ export default function App() {
                         />
                       }
                       previewFooter={
-                        showTrimStage ? (
+                        showUploadStage ? (
+                          <div className="border-t border-muted bg-card/50 p-6 flex flex-col gap-4 text-left">
+                            <div className="space-y-1">
+                              <h3 className="text-sm font-semibold text-foreground">Import from YouTube</h3>
+                              <p className="text-xs text-muted-foreground">
+                                Paste a YouTube link to download and process the video directly.
+                              </p>
+                            </div>
+                            <div className="flex flex-col sm:flex-row gap-3">
+                              <div className="relative flex-1">
+                                <input
+                                  type="url"
+                                  placeholder="https://www.youtube.com/watch?v=..."
+                                  value={ytUrl}
+                                  onChange={(e) => setYtUrl(e.target.value)}
+                                  disabled={isDownloadingYt || isUploadDisabled}
+                                  className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+                                />
+                              </div>
+                              <Button
+                                type="button"
+                                onClick={handleYoutubeImport}
+                                disabled={isDownloadingYt || isUploadDisabled || !ytUrl.trim()}
+                                className="h-10 px-4 whitespace-nowrap"
+                              >
+                                {isDownloadingYt ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Downloading...
+                                  </>
+                                ) : (
+                                  "Download & Import"
+                                )}
+                              </Button>
+                            </div>
+                            {ytDownloadError && (
+                              <p className="text-xs text-destructive mt-1">
+                                {ytDownloadError}
+                              </p>
+                            )}
+                          </div>
+                        ) : showTrimStage ? (
                           <div className="flex flex-col items-center gap-2">
                             <button
                               type="button"
