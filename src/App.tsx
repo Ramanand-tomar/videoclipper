@@ -6482,18 +6482,41 @@ export default function App() {
       for (const blockId of allBlocks) {
         if (!engine.block.isValid(blockId)) continue;
 
-        // Check for video fill property
+        // Check if the block has a fill first
+        try {
+          const fillId = engine.block.getFill(blockId);
+          if (fillId && engine.block.isValid(fillId)) {
+            if (engine.block.hasProperty(fillId, "fill/video/fileURI")) {
+              const uri = engine.block.getString(fillId, "fill/video/fileURI");
+              if (uri) {
+                originalUris[fillId] = uri;
+                if (uri.startsWith("opfs://") && tempBlobUrl) {
+                  engine.block.setString(fillId, "fill/video/fileURI", tempBlobUrl);
+                  console.log(`[Export] Swapped OPFS video fill ${fillId} of block ${blockId} to blob url`);
+                } else if (uri.startsWith("/videos/")) {
+                  const absUrl = window.location.origin + uri;
+                  engine.block.setString(fillId, "fill/video/fileURI", absUrl);
+                  console.log(`[Export] Swapped relative B-roll fill ${fillId} of block ${blockId} to absolute url:`, absUrl);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          // Not all blocks have fills, which is fine
+        }
+
+        // Also check if the block itself has the property (fallback)
         if (engine.block.hasProperty(blockId, "fill/video/fileURI")) {
           const uri = engine.block.getString(blockId, "fill/video/fileURI");
           if (uri) {
             originalUris[blockId] = uri;
             if (uri.startsWith("opfs://") && tempBlobUrl) {
               engine.block.setString(blockId, "fill/video/fileURI", tempBlobUrl);
-              console.log(`[Export] Swapped OPFS block ${blockId} to blob url`);
+              console.log(`[Export] Swapped OPFS block ${blockId} directly to blob url`);
             } else if (uri.startsWith("/videos/")) {
               const absUrl = window.location.origin + uri;
               engine.block.setString(blockId, "fill/video/fileURI", absUrl);
-              console.log(`[Export] Swapped relative video block ${blockId} to absolute url:`, absUrl);
+              console.log(`[Export] Swapped relative video block ${blockId} directly to absolute url:`, absUrl);
             }
           }
         }
@@ -6525,7 +6548,7 @@ export default function App() {
         if (engine.block.isValid(id)) {
           if (engine.block.hasProperty(id, "fill/video/fileURI")) {
             engine.block.setString(id, "fill/video/fileURI", originalUri);
-            console.log(`[Export] Restored video block ${id} URI`);
+            console.log(`[Export] Restored video block/fill ${id} URI`);
           } else if (engine.block.hasProperty(id, "audio/uri")) {
             engine.block.setString(id, "audio/uri", originalUri);
             console.log(`[Export] Restored audio block ${id} URI`);
