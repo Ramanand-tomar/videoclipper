@@ -163,6 +163,7 @@ type LayoutSlot = {
 
 export default function App() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [extractedAudioBlob, setExtractedAudioBlob] = useState<Blob | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -3394,6 +3395,7 @@ export default function App() {
       }
 
       setVideoFile(file);
+      setExtractedAudioBlob(null);
       setIsExtracting(true);
       resetWorkflowState();
       resetPreloadState();
@@ -4832,6 +4834,12 @@ export default function App() {
     let activeStep: ProcessingStepId | null = null;
     let shouldFinalize = true;
     beginWorkflow();
+    if (extractedAudioBlob) {
+      updateProcessingStatus("audio", "complete");
+    }
+    if (currentTranscriptWords && currentTranscriptWords.length > 0) {
+      updateProcessingStatus("transcript", "complete");
+    }
     resetPreloadState();
     setTranscriptDebug(null);
     setGeminiDebug(null);
@@ -4847,20 +4855,32 @@ export default function App() {
 
     try {
       activeStep = "audio";
-      updateProcessingStatus("audio", "active");
-      setProgress(0);
-      setIsExtracting(true);
-      const audioBlob = await extractAudioWithEngine();
-      updateProcessingStatus("audio", "complete");
-      setIsExtracting(false);
+      let audioBlob = extractedAudioBlob;
+      if (!audioBlob) {
+        updateProcessingStatus("audio", "active");
+        setProgress(0);
+        setIsExtracting(true);
+        audioBlob = await extractAudioWithEngine();
+        setExtractedAudioBlob(audioBlob);
+        updateProcessingStatus("audio", "complete");
+        setIsExtracting(false);
+      } else {
+        updateProcessingStatus("audio", "complete");
+      }
 
       activeStep = "transcript";
-      updateProcessingStatus("transcript", "active");
-      let words = await transcribeExtractedAudio(audioBlob);
-      if (!words.length) {
-        throw new Error("Transcript did not contain any timestamped words.");
+      let words = currentTranscriptWords;
+      if (!words || words.length === 0) {
+        updateProcessingStatus("transcript", "active");
+        words = await transcribeExtractedAudio(audioBlob);
+        if (!words.length) {
+          throw new Error("Transcript did not contain any timestamped words.");
+        }
+        setCurrentTranscriptWords(words);
+        updateProcessingStatus("transcript", "complete");
+      } else {
+        updateProcessingStatus("transcript", "complete");
       }
-      updateProcessingStatus("transcript", "complete");
 
       activeStep = "analysis";
       updateProcessingStatus("analysis", "active");
